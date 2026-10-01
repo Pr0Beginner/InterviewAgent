@@ -145,6 +145,22 @@ QPushButton#SecondaryButton {
     background: #FFFFFF;
     border: 1px solid #DFD4F7;
 }
+QPushButton#DangerButton {
+    color: #A84451;
+    background: #FFF9FA;
+    border: 1px solid #EBCBD0;
+    font-weight: 700;
+}
+QPushButton#DangerButton:hover {
+    color: #FFFFFF;
+    background: #B84D5A;
+    border-color: #B84D5A;
+}
+QPushButton#DangerButton:disabled {
+    color: #B7B1BA;
+    background: #F4F2F5;
+    border-color: #E7E3E9;
+}
 QPushButton#NavButton {
     min-height: 24px;
     color: #817B91;
@@ -445,7 +461,46 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     height: 0px;
     background: transparent;
 }
-QMessageBox {
-    background: #FFFFFF;
+QFrame#DialogSurface {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #FFFFFF, stop:0.72 #FCFAFF, stop:1 #F7F2FF);
+    border: 1px solid #DDD2F0;
+    border-radius: 18px;
+}
+QFrame#DialogAccent {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #A77AF0, stop:0.55 #7950D8, stop:1 #D6B4E8);
+    border: none;
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+}
+QLabel#DialogTitle {
+    color: #292531;
+    font-size: 19px;
+    font-weight: 800;
+}
+QLabel#DialogMessage {
+    color: #45404D;
+    font-size: 14px;
+}
+QLabel#DialogDetail {
+    color: #898391;
+    font-size: 12px;
+}
+QPushButton#DialogClose {
+    min-width: 30px;
+    max-width: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    color: #8B8592;
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 0;
+    font-size: 20px;
+}
+QPushButton#DialogClose:hover {
+    color: #5C5365;
+    background: #EEE8F7;
 }
 """

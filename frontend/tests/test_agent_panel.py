@@ -7,15 +7,16 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QTextCursor, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFrame, QPushButton
 
 from client.api.mock_api import MockApiClient
 from client.ui.main_window import MainWindow
 from client.ui.pages.dashboard_page import DashboardPage, OptionalDateTimeEdit
 from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble
+from client.ui.widgets.dialogs import AppDialog
 
 
 class DelayedApi(MockApiClient):
@@ -120,6 +121,43 @@ class AgentPanelTest(unittest.TestCase):
         self.assertIsInstance(page.table.cellWidget(0, page.END_TIME_COLUMN), OptionalDateTimeEdit)
         self.assertEqual(page.filter_combo.maxVisibleItems(), 6)
         self.assertEqual(page.table.cellWidget(0, page.STATUS_COLUMN).maxVisibleItems(), 6)
+        page.close()
+
+    def test_datetime_wheel_does_not_change_value(self):
+        """鼠标滚轮不能意外改变开始时间或结束时间。"""
+        editor = OptionalDateTimeEdit("2026-10-08 14:00")
+        before = editor.value()
+        event = QWheelEvent(
+            QPointF(8, 8), QPointF(8, 8), QPoint(), QPoint(0, 120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate, False,
+        )
+        QApplication.sendEvent(editor, event)
+        self.assertEqual(editor.value(), before)
+
+    def test_discard_button_tracks_dirty_rows(self):
+        """放弃修改按钮只在表格存在未保存内容时可用。"""
+        page = DashboardPage(MockApiClient())
+        self.assertFalse(page.discard_button.isEnabled())
+        original = page.table.item(0, page.COMPANY_COLUMN).text()
+        page.table.item(0, page.COMPANY_COLUMN).setText(original + "测试")
+        self.assertTrue(page.discard_button.isEnabled())
+        page.discard_changes()
+        self.assertFalse(page.discard_button.isEnabled())
+        self.assertEqual(page.table.item(0, page.COMPANY_COLUMN).text(), original)
+        page.close()
+
+    def test_custom_dialog_uses_application_components(self):
+        """确认弹窗使用应用自己的表面和按钮，不依赖系统消息框。"""
+        page = DashboardPage(MockApiClient())
+        dialog = AppDialog(
+            page, title="有尚未保存的修改", message="是否保存？",
+            primary_text="保留修改", destructive_text="放弃修改",
+        )
+        self.assertIsNotNone(dialog.findChild(QFrame, "DialogSurface"))
+        self.assertIsNotNone(dialog.findChild(QPushButton, "PrimaryButton"))
+        self.assertIsNotNone(dialog.findChild(QPushButton, "DangerButton"))
+        dialog.close()
         page.close()
 
     def test_agent_reply_renders_markdown_and_escapes_raw_html(self):

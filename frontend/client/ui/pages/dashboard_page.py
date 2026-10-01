@@ -3,9 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 
 from PySide6.QtCore import QDate, QDateTime, QTime, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QAbstractItemView,
     QComboBox,
     QDateTimeEdit,
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -23,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from client.api.base import ApiClient
 from client.ui.widgets.api_task import TaskRunner
+from client.ui.widgets.dialogs import AppDialog
 
 
 class OptionalDateTimeEdit(QDateTimeEdit):
@@ -58,6 +57,10 @@ class OptionalDateTimeEdit(QDateTimeEdit):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        """滚轮只交给表格滚动，不能意外改变日期或时间。"""
+        event.ignore()
 
 
 class SummaryCard(QFrame):
@@ -171,6 +174,10 @@ class DashboardPage(QWidget):
         self.save_button.setObjectName("PrimaryButton")
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.save_changes)
+        self.discard_button = QPushButton("放弃修改")
+        self.discard_button.setObjectName("DangerButton")
+        self.discard_button.setEnabled(False)
+        self.discard_button.clicked.connect(self._confirm_discard_changes)
         controls.addWidget(QLabel("筛选状态"))
         controls.addWidget(self.filter_combo)
         controls.addStretch()
@@ -181,6 +188,7 @@ class DashboardPage(QWidget):
         self.save_feedback.hide()
         controls.addWidget(self.save_feedback)
         controls.addWidget(pending_hint)
+        controls.addWidget(self.discard_button)
         controls.addWidget(self.save_button)
         layout.addWidget(toolbar)
 
@@ -396,7 +404,7 @@ class DashboardPage(QWidget):
                     interview_end_time=record["interview_end_time"],
                 )
         except Exception as exc:  # HTTP 客户端负责将底层错误转换为用户可读的接口错误。
-            QMessageBox.critical(self, "保存失败", f"修改未能保存：{exc}")
+            AppDialog.show_error(self, "保存失败", f"修改未能保存：{exc}")
             return False
 
         count = len(pending_ids)
@@ -409,31 +417,42 @@ class DashboardPage(QWidget):
     def discard_changes(self) -> None:
         self.refresh()
 
+    def _confirm_discard_changes(self) -> None:
+        """通过统一样式的弹窗确认主动放弃本页修改。"""
+        if not self.has_pending_changes:
+            return
+        result = AppDialog(
+            self,
+            title="放弃本页修改",
+            message=f"将撤销当前 {len(self._dirty_ids)} 行尚未保存的修改。",
+            detail="该操作只恢复表格内容，不会影响已经保存到服务端的数据。",
+            primary_text="继续编辑",
+            destructive_text="放弃修改",
+            cancel_text=None,
+        ).exec()
+        if result == AppDialog.DESTRUCTIVE:
+            self.discard_changes()
+
     def resolve_pending_changes(self, action: str) -> bool:
         """判断用户请求的页面切换或关闭操作是否可以继续。"""
 
         if not self.has_pending_changes:
             return True
 
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("有尚未保存的修改")
-        dialog.setIcon(QMessageBox.Icon.Question)
-        dialog.setText(f"当前有 {len(self._dirty_ids)} 行记录被修改。{action}前是否保留这些修改？")
-        dialog.setInformativeText("保留修改会保存到当前数据源；放弃修改会恢复原来的内容。")
-        keep_button = dialog.addButton("保留修改", QMessageBox.ButtonRole.AcceptRole)
-        discard_button = dialog.addButton("放弃修改", QMessageBox.ButtonRole.DestructiveRole)
-        cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        dialog.setDefaultButton(keep_button)
-        dialog.exec()
-
-        clicked: QAbstractButton | None = dialog.clickedButton()
-        if clicked is keep_button:
+        result = AppDialog(
+            self,
+            title="有尚未保存的修改",
+            message=f"当前有 {len(self._dirty_ids)} 行记录被修改。{action}前是否保存？",
+            detail="保存后继续当前操作；放弃修改会恢复为服务端中的内容。",
+            primary_text="保留修改",
+            destructive_text="放弃修改",
+            cancel_text="取消",
+        ).exec()
+        if result == AppDialog.PRIMARY:
             return self.save_changes()
-        if clicked is discard_button:
+        if result == AppDialog.DESTRUCTIVE:
             self.discard_changes()
             return True
-        if clicked is cancel_button:
-            return False
         return False
 
     def _on_filter_changed(self, selected_filter: str) -> None:
@@ -486,6 +505,7 @@ class DashboardPage(QWidget):
     def _update_save_state(self) -> None:
         count = len(self._dirty_ids)
         self.save_button.setEnabled(count > 0)
+        self.discard_button.setEnabled(count > 0)
         self.save_button.setText(f"保存修改（{count}）" if count else "保存修改")
 
     def _record_id_for_row(self, row: int) -> int | None:
