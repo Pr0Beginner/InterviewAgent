@@ -171,7 +171,7 @@ class ConnectorTest(StoreTest):
 
     def test_agent_cannot_update_without_querying_record_first(self):
         provider = FakeProvider([
-            [native_chunk({"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "update_interview_status", "arguments": '{"interview_id":1,"expected_status":"一面","target_status":"二面"}'}}]}, "tool_calls")],
+            [native_chunk({"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "update_interview", "arguments": '{"interview_id":1,"expected_status":"一面","position_name":"AI应用研发","base_location":"深圳"}'}}]}, "tool_calls")],
             [native_chunk({"content": "需要先查询。"}, "stop")],
         ])
         executor = Mock()
@@ -179,3 +179,38 @@ class ConnectorTest(StoreTest):
         asyncio.run(runtime.complete(ChatCompletionRequest(model="interview-assistant", messages=[{"role": "user", "content": "更新状态"}])))
         executor.assert_not_called()
         self.assertIn("本轮尚未查询", provider.requests[1]["messages"][-1]["content"])
+
+    def test_agent_can_update_arbitrary_fields_after_unique_query(self):
+        """查询得到记录 ID 后，Agent 可以组合修改任意可编辑业务字段。"""
+        provider = FakeProvider([
+            [native_chunk({"tool_calls": [{"index": 0, "id": "query-1", "function": {
+                "name": "query_interview_status",
+                "arguments": '{"company_name":"华为","page":1,"page_size":20}',
+            }}]}, "tool_calls")],
+            [native_chunk({"tool_calls": [{"index": 0, "id": "update-1", "function": {
+                "name": "update_interview",
+                "arguments": '{"interview_id":10,"expected_status":"待面试","company_name":"华为","position_name":"AI应用研发","base_location":"深圳","interview_time":"2026-10-08T14:00:00","job_url":"https://www.zhipin.com/job_detail/example.html"}',
+            }}]}, "tool_calls")],
+            [native_chunk({"content": "已更新华为的面试记录。"}, "stop")],
+        ])
+        executor = Mock(side_effect=[
+            {"items": [{"id": 10, "company_name": "华为", "current_status": "待面试"}]},
+            {"id": 10, "company_name": "华为", "position_name": "AI应用研发",
+             "base_location": "深圳", "current_status": "待面试"},
+        ])
+        runtime = AgentRuntime(Settings(_env_file=None), provider, executor)
+
+        response = asyncio.run(runtime.complete(ChatCompletionRequest(
+            model="interview-assistant",
+            messages=[{"role": "user", "content": "把华为岗位改为 AI应用研发，Base 改为深圳，并更新面试时间和岗位链接"}],
+        )))
+
+        self.assertEqual(response["choices"][0]["message"]["content"], "已更新华为的面试记录。")
+        self.assertEqual(executor.call_count, 2)
+        update_name, update_arguments = executor.call_args_list[1].args
+        self.assertEqual(update_name, "update_interview")
+        parsed = json.loads(update_arguments)
+        self.assertEqual(parsed["position_name"], "AI应用研发")
+        self.assertEqual(parsed["base_location"], "深圳")
+        self.assertEqual(parsed["interview_time"], "2026-10-08T14:00:00")
+        self.assertIn("job_url", parsed)

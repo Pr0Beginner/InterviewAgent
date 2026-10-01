@@ -88,6 +88,26 @@ class WorkflowsTest(StoreTest):
         with self.factory() as session:
             self.assertEqual(session.get(JobApplication, created["id"]).current_status, "一面")
 
+    def test_agent_can_update_position_base_and_url_without_changing_status(self):
+        """更新工具可局部修改整行字段，省略的状态和时间保持不变。"""
+        created = self.create()
+        changed = self.graphs.mutate({
+            "interview_id": created["id"],
+            "expected_status": "一面",
+            "position_name": "AI应用研发",
+            "base_location": "深圳",
+            "job_url": "https://example.com/jobs/ai-application",
+        }, "update-fields")
+        self.assertEqual(changed["position_name"], "AI应用研发")
+        self.assertEqual(changed["base_location"], "深圳")
+        self.assertEqual(changed["job_url"], "https://example.com/jobs/ai-application")
+        self.assertEqual(changed["current_status"], "一面")
+        with self.factory() as session:
+            row = session.get(JobApplication, created["id"])
+            self.assertEqual(row.position_name, "AI应用研发")
+            self.assertEqual(row.base_location, "深圳")
+            self.assertEqual(session.scalar(select(func.count()).select_from(ApplicationStatusHistory)), 1)
+
     def test_query_graph_reports_remote_conflict_without_mutating(self):
         created = self.create()
         self.feishu.configured = True

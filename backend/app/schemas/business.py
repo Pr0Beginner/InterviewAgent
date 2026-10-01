@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from backend.app.models.enums import InterviewStatus
 from backend.app.schemas.common import ExtensibleRequest
@@ -20,9 +20,25 @@ class CreateInterview(ExtensibleRequest):
 class ChangeInterview(ExtensibleRequest):
     interview_id: int = Field(ge=1, description="先查询取得的记录 ID")
     expected_status: InterviewStatus = Field(description="查询时状态，防止覆盖并发修改")
-    target_status: InterviewStatus = Field(description="用户要求修改到的状态")
+    company_name: str | None = Field(default=None, min_length=1, max_length=255, description="新的公司名称；省略保留原值")
+    position_name: str | None = Field(default=None, min_length=1, max_length=255, description="新的岗位名称；省略保留原值")
+    base_location: str | None = Field(default=None, min_length=1, max_length=100, description="新的 Base 地；省略保留原值")
+    target_status: InterviewStatus | None = Field(default=None, description="新的投递状态；省略保留原值")
     interview_time: datetime | None = Field(default=None, description="省略保留原值，null 清空，中国本地时间 ISO 8601")
+    job_url: HttpUrl | None = Field(default=None, description="新的岗位链接；省略保留原值，null 清空")
     note: str | None = Field(default=None, max_length=2000, description="写入状态历史的备注")
+
+    @model_validator(mode="after")
+    def validate_changes(self):
+        """至少修改一个业务字段，且文本字段不能显式清空。"""
+        editable = {"company_name", "position_name", "base_location", "target_status", "interview_time", "job_url"}
+        changed = editable & self.model_fields_set
+        if not changed:
+            raise ValueError("至少提供一个需要修改的业务字段")
+        for field_name in ("company_name", "position_name", "base_location", "target_status"):
+            if field_name in changed and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} 不能为 null")
+        return self
 
 
 class EmailSyncRequest(ExtensibleRequest):

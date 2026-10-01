@@ -38,7 +38,7 @@ QUERY_TOOL = {
 }
 
 MUTATION_TOOLS = [
-    {"type": "function", "function": {"name": "update_interview_status", "description": "用户明确要求修改时使用。必须先查询，确定唯一记录 ID 与当前状态；同名多岗位要询问用户。", "parameters": ChangeInterview.model_json_schema()}},
+    {"type": "function", "function": {"name": "update_interview", "description": "通用修改任意一条投递或面试记录。可按需修改公司、岗位、Base、状态、面试时间和岗位链接；必须先查询并唯一定位记录，只传用户明确要求修改的字段。", "parameters": ChangeInterview.model_json_schema()}},
     {"type": "function", "function": {"name": "create_interview", "description": "用户明确要求添加投递时使用；公司、岗位、Base 和状态须来自用户，缺失时询问。", "parameters": CreateInterview.model_json_schema()}},
 ]
 
@@ -107,7 +107,7 @@ def execute_tool(name: str, arguments: str) -> dict[str, Any]:
         if name == "query_interview_status":
             query = InterviewQuery.model_validate_json(arguments)
             return InterviewWorkflows().query(query.model_dump(mode="json"))
-        if name in {"update_interview_status", "create_interview"}:
+        if name in {"update_interview", "update_interview_status", "create_interview"}:
             model = CreateInterview if name == "create_interview" else ChangeInterview
             request = model.model_validate_json(arguments)
             return InterviewWorkflows().mutate(request.model_dump(mode="json", exclude_unset=True),

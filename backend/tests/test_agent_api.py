@@ -13,7 +13,13 @@ from sqlalchemy.pool import StaticPool
 from backend.app.agent.errors import AgentError
 from backend.app.agent.runtime import AgentRuntime
 from backend.app.agent.prompts import system_prompt
-from backend.app.agent.tools import BUSINESS_TOOLS, InterviewQuery, execute_tool, run_interview_query
+from backend.app.agent.tools import (
+    BUSINESS_TOOLS,
+    MUTATION_TOOLS,
+    InterviewQuery,
+    execute_tool,
+    run_interview_query,
+)
 from backend.app.api.routes.chat import get_agent_runtime
 from backend.app.core.config import Settings
 from backend.app.db.base import Base
@@ -145,9 +151,28 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(executor.call_count, 1)
 
     def test_tools_reject_unsafe_or_invalid_arguments(self):
-        self.assertIn("error", execute_tool("update_interview_status", "{}"))
+        self.assertIn("error", execute_tool("update_interview", "{}"))
         self.assertIn("error", execute_tool("query_interview_status", '{"page_size":100000}'))
         self.assertIn("error", execute_tool("query_interview_status", '{"sql":"DROP TABLE jobs"}'))
+
+    def test_general_update_tool_exposes_every_editable_business_field(self):
+        """模型看到的是通用修改工具，而不是只能修改状态的专用工具。"""
+        tools = {item["function"]["name"]: item["function"] for item in MUTATION_TOOLS}
+        self.assertIn("update_interview", tools)
+        self.assertNotIn("update_interview_status", tools)
+        properties = tools["update_interview"]["parameters"]["properties"]
+        self.assertTrue({
+            "interview_id",
+            "expected_status",
+            "company_name",
+            "position_name",
+            "base_location",
+            "target_status",
+            "interview_time",
+            "job_url",
+        }.issubset(properties))
+        self.assertNotIn("updated_at", properties)
+        self.assertNotIn("created_at", properties)
 
     def test_email_tool_supports_all_scopes_and_hides_async_details(self):
         """Agent 使用等待完成的通用邮件工具，不把任务轮询机制暴露给用户。"""

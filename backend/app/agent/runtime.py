@@ -188,7 +188,7 @@ class AgentRuntime:
                     arguments = None
                 if not isinstance(arguments, dict):
                     result = {"error": "工具参数必须是 JSON 对象。"}
-                elif function["name"] == "update_interview_status" and arguments.get("interview_id") not in queried_ids:
+                elif function["name"] in {"update_interview", "update_interview_status"} and arguments.get("interview_id") not in queried_ids:
                     result = {"error": "本轮尚未查询该记录，请先调用查询工具并确认唯一目标。"}
                 else:
                     result = await asyncio.to_thread(

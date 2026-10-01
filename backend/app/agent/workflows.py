@@ -148,9 +148,18 @@ class InterviewWorkflows:
                 if row.current_status != request.expected_status.value:
                     raise ApplicationError("STATUS_CONFLICT", "记录已被修改，请重新查询后操作。", status_code=409)
                 previous_status = row.current_status
-                row.current_status = request.target_status.value
+                if "company_name" in request.model_fields_set:
+                    row.company_name = request.company_name
+                if "position_name" in request.model_fields_set:
+                    row.position_name = request.position_name
+                if "base_location" in request.model_fields_set:
+                    row.base_location = request.base_location
+                if "target_status" in request.model_fields_set:
+                    row.current_status = request.target_status.value
                 if "interview_time" in request.model_fields_set:
                     row.interview_time = request.interview_time
+                if "job_url" in request.model_fields_set:
+                    row.job_url = str(request.job_url) if request.job_url else None
                 note = request.note
             row.updated_at = datetime.now()
             if previous_status != row.current_status:
