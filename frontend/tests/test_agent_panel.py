@@ -7,15 +7,16 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QDate, QDateTime, QPoint, QPointF, QTime, Qt
 from PySide6.QtGui import QTextCursor, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFrame, QPushButton
+from PySide6.QtWidgets import QApplication, QCalendarWidget, QFrame, QPushButton
 
 from client.api.mock_api import MockApiClient
 from client.ui.main_window import MainWindow
-from client.ui.pages.dashboard_page import DashboardPage, OptionalDateTimeEdit
+from client.ui.pages.dashboard_page import DashboardPage
 from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble
+from client.ui.widgets.datetime_picker import DateTimePicker, DateTimePickerDialog
 from client.ui.widgets.dialogs import AppDialog
 
 
@@ -117,15 +118,15 @@ class AgentPanelTest(unittest.TestCase):
         self.assertEqual(page.table.horizontalHeaderItem(page.START_TIME_COLUMN).text(), "开始时间")
         self.assertEqual(page.table.horizontalHeaderItem(page.END_TIME_COLUMN).text(), "结束时间")
         self.assertEqual(page.table.item(0, page.COMPANY_COLUMN).text(), "百度")
-        self.assertIsInstance(page.table.cellWidget(0, page.START_TIME_COLUMN), OptionalDateTimeEdit)
-        self.assertIsInstance(page.table.cellWidget(0, page.END_TIME_COLUMN), OptionalDateTimeEdit)
+        self.assertIsInstance(page.table.cellWidget(0, page.START_TIME_COLUMN), DateTimePicker)
+        self.assertIsInstance(page.table.cellWidget(0, page.END_TIME_COLUMN), DateTimePicker)
         self.assertEqual(page.filter_combo.maxVisibleItems(), 6)
         self.assertEqual(page.table.cellWidget(0, page.STATUS_COLUMN).maxVisibleItems(), 6)
         page.close()
 
     def test_datetime_wheel_does_not_change_value(self):
         """鼠标滚轮不能意外改变开始时间或结束时间。"""
-        editor = OptionalDateTimeEdit("2026-10-08 14:00")
+        editor = DateTimePicker("2026-10-08 14:00", "选择开始时间")
         before = editor.value()
         event = QWheelEvent(
             QPointF(8, 8), QPointF(8, 8), QPoint(), QPoint(0, 120),
@@ -134,6 +135,35 @@ class AgentPanelTest(unittest.TestCase):
         )
         QApplication.sendEvent(editor, event)
         self.assertEqual(editor.value(), before)
+
+    def test_datetime_picker_has_calendar_hour_and_minute_controls(self):
+        """时间选择弹窗必须同时提供日期、小时和分钟控件。"""
+        page = DashboardPage(MockApiClient())
+        dialog = DateTimePickerDialog(
+            page,
+            title="选择开始时间",
+            value=QDateTime(QDate(2026, 10, 8), QTime(14, 30)),
+        )
+        self.assertIsNotNone(dialog.findChild(QCalendarWidget, "DateTimeCalendar"))
+        self.assertEqual(dialog.hour_combo.count(), 24)
+        self.assertEqual(dialog.minute_combo.count(), 60)
+
+        dialog.hour_combo.setCurrentIndex(14)
+        wheel_event = QWheelEvent(
+            QPointF(8, 8), QPointF(8, 8), QPoint(), QPoint(0, 120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate, False,
+        )
+        QApplication.sendEvent(dialog.hour_combo, wheel_event)
+        self.assertEqual(dialog.hour_combo.currentIndex(), 14)
+
+        dialog.calendar.setSelectedDate(QDate(2026, 10, 12))
+        dialog.hour_combo.setCurrentIndex(9)
+        dialog.minute_combo.setCurrentIndex(45)
+        dialog._accept_value()
+        self.assertEqual(dialog.result_value.toString("yyyy-MM-dd HH:mm"), "2026-10-12 09:45")
+        dialog.close()
+        page.close()
 
     def test_discard_button_tracks_dirty_rows(self):
         """放弃修改按钮只在表格存在未保存内容时可用。"""

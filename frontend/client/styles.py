@@ -265,7 +265,7 @@ QPlainTextEdit#InterviewAnswer {
     border-radius: 14px;
     padding: 12px;
 }
-QLineEdit, QPlainTextEdit, QComboBox, QDateTimeEdit {
+QLineEdit, QPlainTextEdit, QComboBox {
     color: #25232D;
     background: #FAF9FD;
     border: 1px solid #EBE9F2;
@@ -273,10 +273,10 @@ QLineEdit, QPlainTextEdit, QComboBox, QDateTimeEdit {
     padding: 8px 10px;
     selection-background-color: #E9DEFC;
 }
-QLineEdit:hover, QPlainTextEdit:hover, QComboBox:hover, QDateTimeEdit:hover {
+QLineEdit:hover, QPlainTextEdit:hover, QComboBox:hover {
     border-color: #D9CEF8;
 }
-QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QDateTimeEdit:focus {
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
     background: #FFFFFF;
     border-color: #CFC0F4;
 }
@@ -290,10 +290,6 @@ QComboBox::drop-down {
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
 }
-QDateTimeEdit::drop-down {
-    width: 25px;
-    border: none;
-}
 QTableWidget QComboBox#TableEditor {
     color: #6237AE;
     background: #F7F3FF;
@@ -302,18 +298,29 @@ QTableWidget QComboBox#TableEditor {
     padding: 5px 30px 5px 10px;
     font-weight: 700;
 }
-QTableWidget QDateTimeEdit#TableEditor {
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    padding: 4px 6px;
-}
 QTableWidget QComboBox#TableEditor:hover,
-QTableWidget QDateTimeEdit#TableEditor:hover,
-QTableWidget QComboBox#TableEditor:focus,
-QTableWidget QDateTimeEdit#TableEditor:focus {
+QTableWidget QComboBox#TableEditor:focus {
     background: #F3EDFF;
     border: 1px solid #D9CEF8;
+}
+QPushButton#DateTimePickerButton {
+    min-height: 25px;
+    color: #4F495B;
+    background: #FBFAFE;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 5px 9px;
+    text-align: left;
+    font-size: 12px;
+}
+QPushButton#DateTimePickerButton:hover,
+QPushButton#DateTimePickerButton:focus {
+    color: #683CB7;
+    background: #F3EDFF;
+    border-color: #D9CEF8;
+}
+QPushButton#DateTimePickerButton[empty="true"] {
+    color: #AAA5B2;
 }
 QComboBox#TableEditor[statusTone="offer"],
 QComboBox#StatusFilter[statusTone="offer"] {
@@ -466,6 +473,62 @@ QFrame#DialogSurface {
                                 stop:0 #FFFFFF, stop:0.72 #FCFAFF, stop:1 #F7F2FF);
     border: 1px solid #DDD2F0;
     border-radius: 18px;
+}
+QFrame#DateTimePickerSurface {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #FFFFFF, stop:0.72 #FCFAFF, stop:1 #F7F2FF);
+    border: 1px solid #DDD2F0;
+    border-radius: 18px;
+}
+QCalendarWidget#DateTimeCalendar {
+    color: #39343F;
+    background: transparent;
+    border: none;
+    padding: 0 22px;
+}
+QCalendarWidget#DateTimeCalendar QWidget#qt_calendar_navigationbar {
+    background: #F7F2FF;
+    border: none;
+    border-radius: 10px;
+    margin: 0 22px 8px 22px;
+}
+QCalendarWidget#DateTimeCalendar QToolButton {
+    color: #6237AE;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-weight: 700;
+}
+QCalendarWidget#DateTimeCalendar QToolButton:hover {
+    background: #EDE4FC;
+}
+QCalendarWidget#DateTimeCalendar QAbstractItemView {
+    color: #4F495B;
+    background: #FFFFFF;
+    alternate-background-color: #FFFFFF;
+    border: none;
+    outline: none;
+    selection-color: #FFFFFF;
+    selection-background-color: #8150DB;
+}
+QLabel#PickerFieldLabel {
+    color: #514B5A;
+    font-weight: 700;
+}
+QComboBox#TimePartCombo {
+    min-width: 90px;
+    color: #6237AE;
+    background: #F8F4FF;
+    border: 1px solid #DED2F5;
+    border-radius: 10px;
+    padding: 8px 34px 8px 12px;
+    font-weight: 700;
+}
+QComboBox#TimePartCombo:hover,
+QComboBox#TimePartCombo:focus {
+    background: #FFFFFF;
+    border-color: #BFA8EB;
 }
 QFrame#DialogAccent {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,

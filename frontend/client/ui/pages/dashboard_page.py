@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from PySide6.QtCore import QDate, QDateTime, QTime, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QWheelEvent
+from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QDateTimeEdit,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -21,46 +20,8 @@ from PySide6.QtWidgets import (
 
 from client.api.base import ApiClient
 from client.ui.widgets.api_task import TaskRunner
+from client.ui.widgets.datetime_picker import DateTimePicker
 from client.ui.widgets.dialogs import AppDialog
-
-
-class OptionalDateTimeEdit(QDateTimeEdit):
-    """日期时间编辑器，使用破折号表示空值。"""
-
-    NULL_DATETIME = QDateTime(QDate(2000, 1, 1), QTime(0, 0))
-
-    def __init__(self, value: str | None = None, parent=None) -> None:
-        super().__init__(parent)
-        self.setCalendarPopup(True)
-        self.setDisplayFormat("yyyy-MM-dd HH:mm")
-        self.setMinimumDateTime(self.NULL_DATETIME)
-        self.setSpecialValueText("—")
-        self.set_value(value)
-
-    def set_value(self, value: str | None) -> None:
-        parsed = _parse_datetime(value)
-        self.setDateTime(parsed if parsed.isValid() else self.NULL_DATETIME)
-
-    def value(self) -> str | None:
-        if self.dateTime() == self.NULL_DATETIME:
-            return None
-        return self.dateTime().toString("yyyy-MM-dd HH:mm")
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if self.dateTime() == self.NULL_DATETIME:
-            self.setDateTime(QDateTime.currentDateTime())
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in {Qt.Key.Key_Delete, Qt.Key.Key_Backspace}:
-            self.setDateTime(self.NULL_DATETIME)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        """滚轮只交给表格滚动，不能意外改变日期或时间。"""
-        event.ignore()
 
 
 class SummaryCard(QFrame):
@@ -305,23 +266,15 @@ class DashboardPage(QWidget):
             )
             self.table.setCellWidget(row, self.STATUS_COLUMN, status_combo)
 
-            start_time = OptionalDateTimeEdit(record.get("interview_time"))
-            start_time.setObjectName("TableEditor")
-            _update_datetime_tooltip(start_time, allow_empty=True, empty_name="开始时间")
+            start_time = DateTimePicker(record.get("interview_time"), "选择开始时间")
             start_time.dateTimeChanged.connect(
-                lambda _value, record_id=interview_id, editor=start_time: self._on_datetime_changed(
-                    record_id, editor, allow_empty=True, empty_name="开始时间"
-                )
+                lambda record_id=interview_id: self._on_datetime_changed(record_id)
             )
             self.table.setCellWidget(row, self.START_TIME_COLUMN, start_time)
 
-            end_time = OptionalDateTimeEdit(record.get("interview_end_time"))
-            end_time.setObjectName("TableEditor")
-            _update_datetime_tooltip(end_time, allow_empty=True, empty_name="结束时间")
+            end_time = DateTimePicker(record.get("interview_end_time"), "选择结束时间")
             end_time.dateTimeChanged.connect(
-                lambda _value, record_id=interview_id, editor=end_time: self._on_datetime_changed(
-                    record_id, editor, allow_empty=True, empty_name="结束时间"
-                )
+                lambda record_id=interview_id: self._on_datetime_changed(record_id)
             )
             self.table.setCellWidget(row, self.END_TIME_COLUMN, end_time)
 
@@ -345,11 +298,7 @@ class DashboardPage(QWidget):
     def _on_datetime_changed(
         self,
         interview_id: int,
-        editor: QDateTimeEdit,
-        allow_empty: bool = False,
-        empty_name: str = "时间",
     ) -> None:
-        _update_datetime_tooltip(editor, allow_empty=allow_empty, empty_name=empty_name)
         self._mark_record_changed(interview_id)
 
     def _mark_record_changed(self, interview_id: int) -> None:
@@ -372,8 +321,8 @@ class DashboardPage(QWidget):
         start_time_editor = self.table.cellWidget(row, self.START_TIME_COLUMN)
         end_time_editor = self.table.cellWidget(row, self.END_TIME_COLUMN)
         assert isinstance(status_editor, QComboBox)
-        assert isinstance(start_time_editor, OptionalDateTimeEdit)
-        assert isinstance(end_time_editor, OptionalDateTimeEdit)
+        assert isinstance(start_time_editor, DateTimePicker)
+        assert isinstance(end_time_editor, DateTimePicker)
         return {
             "id": interview_id,
             "company_name": self._item_text(row, self.COMPANY_COLUMN),
@@ -690,12 +639,3 @@ def _configure_status_combo(combo: QComboBox) -> None:
     combo.view().setMaximumHeight(240)
     combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     combo.view().setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-
-
-def _update_datetime_tooltip(
-    editor: QDateTimeEdit, allow_empty: bool = False, empty_name: str = "时间"
-) -> None:
-    if allow_empty and isinstance(editor, OptionalDateTimeEdit) and editor.value() is None:
-        editor.setToolTip(f"无{empty_name}；点击选择，按 Delete 或 Backspace 清空")
-        return
-    editor.setToolTip(editor.dateTime().toString("yyyy-MM-dd HH:mm"))
