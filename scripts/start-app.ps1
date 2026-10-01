@@ -24,6 +24,18 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
     throw "Project virtual environment was not found: $pythonPath"
 }
 
+# 启动前将本地 MySQL 结构升级到代码要求的最新版本。
+Push-Location $projectRoot
+try {
+    & $pythonPath -m alembic -c "backend\alembic.ini" upgrade head
+    if ($LASTEXITCODE -ne 0) {
+        throw "Database migration failed."
+    }
+}
+finally {
+    Pop-Location
+}
+
 if (-not (Test-BackendHealth)) {
     $backendProcess = Start-Process `
         -FilePath $pythonPath `

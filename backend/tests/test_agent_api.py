@@ -169,6 +169,7 @@ class AgentApiTest(unittest.TestCase):
             "base_location",
             "target_status",
             "interview_time",
+            "interview_end_time",
             "job_url",
         }.issubset(properties))
         self.assertNotIn("updated_at", properties)

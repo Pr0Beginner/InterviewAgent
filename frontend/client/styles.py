@@ -12,8 +12,12 @@ QWidget {
     font-family: "Microsoft YaHei UI", "Segoe UI";
     font-size: 14px;
 }
-QWidget#AppRoot, QStackedWidget#PageStack, QWidget#PageSurface {
+QWidget#AppRoot, QStackedWidget#PageStack {
     background: #FFFFFF;
+}
+QWidget#PageSurface {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #FFFFFF, stop:0.58 #FCFBFF, stop:1 #F7F2FF);
 }
 QLabel {
     background: transparent;
@@ -162,7 +166,8 @@ QPushButton#NavButton:checked {
 }
 
 QFrame#SummaryCard, QFrame#Card {
-    background: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #FFFFFF, stop:1 #FAF7FF);
     border: 1px solid #EBE9F2;
     border-radius: 14px;
 }
@@ -220,9 +225,29 @@ QLabel#JdBox {
 }
 
 QFrame#Toolbar {
-    background: #FAF9FD;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #FBFAFE, stop:1 #F5F0FF);
     border: 1px solid #EBE9F2;
     border-radius: 12px;
+}
+QFrame#InterviewSettings {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #FBFAFE, stop:0.55 #F8F4FF, stop:1 #FDF8F5);
+    border: 1px solid #E7DFF5;
+    border-radius: 14px;
+}
+QTextBrowser#InterviewTranscript {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #FFFFFF, stop:1 #FAF7FF);
+    border: 1px solid #E7DFF2;
+    border-radius: 16px;
+    padding: 14px;
+}
+QPlainTextEdit#InterviewAnswer {
+    background: rgba(255, 255, 255, 238);
+    border: 1px solid #E2D8F3;
+    border-radius: 14px;
+    padding: 12px;
 }
 QLineEdit, QPlainTextEdit, QComboBox, QDateTimeEdit {
     color: #25232D;

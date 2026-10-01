@@ -25,12 +25,20 @@ class MockApiClientTest(unittest.TestCase):
             base_location="广州",
             current_status="三面",
             interview_time="2026-10-10 15:30",
-            updated_at="2026-09-30 16:00",
+            interview_end_time="2026-10-10 16:30",
             extensions={"source": "editable_table"},
         )
         self.assertEqual(updated["company_name"], "网易游戏")
         self.assertEqual(updated["interview_time"], "2026-10-10 15:30")
+        self.assertEqual(updated["interview_end_time"], "2026-10-10 16:30")
         self.assertNotIn("next_action", updated)
+
+    def test_interviews_are_sorted_by_start_time_descending(self) -> None:
+        items = self.api.list_interviews(page=1, page_size=20)["items"]
+        populated = [item["interview_time"] for item in items if item["interview_time"]]
+        self.assertEqual(populated, sorted(populated, reverse=True))
+        first_empty = next((index for index, item in enumerate(items) if not item["interview_time"]), len(items))
+        self.assertTrue(all(not item["interview_time"] for item in items[first_empty:]))
 
     def test_agent_returns_openai_completion(self) -> None:
         response = self.api.create_chat_completion([

@@ -50,6 +50,7 @@ class InterviewsApiTest(unittest.TestCase):
                         base_location="杭州",
                         current_status="一面",
                         interview_time=datetime(2026, 10, 8, 14, 0),
+                        interview_end_time=datetime(2026, 10, 8, 15, 0),
                         job_url="https://example.com/netease",
                         updated_at=datetime(2026, 9, 30, 10, 20),
                     ),
@@ -59,6 +60,7 @@ class InterviewsApiTest(unittest.TestCase):
                         base_location="上海",
                         current_status="笔试中",
                         interview_time=None,
+                        interview_end_time=None,
                         job_url="https://example.com/bytedance",
                         updated_at=datetime(2026, 9, 29, 18, 10),
                     ),
@@ -67,7 +69,8 @@ class InterviewsApiTest(unittest.TestCase):
                         position_name="Java 服务端开发",
                         base_location="北京",
                         current_status="简历筛选中",
-                        interview_time=None,
+                        interview_time=datetime(2026, 10, 10, 10, 0),
+                        interview_end_time=datetime(2026, 10, 10, 11, 0),
                         job_url="https://example.com/meituan",
                         updated_at=datetime(2026, 9, 27, 9, 30),
                     ),
@@ -89,6 +92,13 @@ class InterviewsApiTest(unittest.TestCase):
         self.assertEqual(payload["summary"]["status_counts"]["笔试中"], 1)
         self.assertEqual(payload["summary"]["status_counts"]["Offer"], 0)
 
+    def test_list_interviews_orders_by_start_time_descending_with_empty_last(self) -> None:
+        response = self.client.get("/api/interviews", params={"page": 1, "page_size": 10})
+
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["items"]
+        self.assertEqual([item["company_name"] for item in items], ["美团", "网易", "字节跳动"])
+
     def test_full_update_accepts_extensions_and_writes_status_history(self) -> None:
         interview_id = self._application_id("网易")
         response = self.client.patch(
@@ -99,7 +109,7 @@ class InterviewsApiTest(unittest.TestCase):
                 "base_location": "广州",
                 "current_status": "二面",
                 "interview_time": "2026-10-10T15:30:00",
-                "updated_at": "2026-09-30T16:00:00",
+                "interview_end_time": "2026-10-10T16:30:00",
                 "extensions": {"source": "editable_table"},
             },
         )
@@ -108,6 +118,7 @@ class InterviewsApiTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["company_name"], "网易游戏")
         self.assertEqual(payload["current_status"], "二面")
+        self.assertTrue(payload["interview_end_time"].startswith("2026-10-10T16:30"))
         self.assertEqual(payload["feishu_sync_status"], "pending")
         self.assertNotIn("extensions", payload)
 

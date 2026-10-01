@@ -38,7 +38,7 @@ QUERY_TOOL = {
 }
 
 MUTATION_TOOLS = [
-    {"type": "function", "function": {"name": "update_interview", "description": "通用修改任意一条投递或面试记录。可按需修改公司、岗位、Base、状态、面试时间和岗位链接；必须先查询并唯一定位记录，只传用户明确要求修改的字段。", "parameters": ChangeInterview.model_json_schema()}},
+    {"type": "function", "function": {"name": "update_interview", "description": "通用修改任意一条投递或面试记录。可按需修改公司、岗位、Base、状态、开始时间、结束时间和岗位链接；必须先查询并唯一定位记录，只传用户明确要求修改的字段。", "parameters": ChangeInterview.model_json_schema()}},
     {"type": "function", "function": {"name": "create_interview", "description": "用户明确要求添加投递时使用；公司、岗位、Base 和状态须来自用户，缺失时询问。", "parameters": CreateInterview.model_json_schema()}},
 ]
 

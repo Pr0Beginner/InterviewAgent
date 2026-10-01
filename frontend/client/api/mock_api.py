@@ -82,7 +82,15 @@ class MockApiClient(ApiClient):
     ) -> dict[str, Any]:
         page = max(1, page)
         page_size = max(1, page_size)
-        records = self._interviews
+        records = sorted(
+            self._interviews,
+            key=lambda record: (
+                record.get("interview_time") is not None,
+                record.get("interview_time") or "",
+                record["id"],
+            ),
+            reverse=True,
+        )
         if company_name:
             records = [r for r in records if company_name.lower() in r["company_name"].lower()]
         if position_name:
@@ -160,7 +168,7 @@ class MockApiClient(ApiClient):
         base_location: str,
         current_status: str,
         interview_time: str | None,
-        updated_at: str,
+        interview_end_time: str | None,
         extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         record = next((r for r in self._interviews if r["id"] == interview_id), None)
@@ -175,7 +183,8 @@ class MockApiClient(ApiClient):
                 "base_location": base_location,
                 "current_status": current_status,
                 "interview_time": interview_time,
-                "updated_at": updated_at,
+                "interview_end_time": interview_end_time,
+                "updated_at": _now(),
             }
         )
         return {**deepcopy(record), "feishu_sync_status": "success"}

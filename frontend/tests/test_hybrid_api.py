@@ -56,6 +56,7 @@ class HybridApiClientTest(unittest.TestCase):
                     "base_location": "杭州",
                     "current_status": "二面",
                     "interview_time": "2026-10-08T14:00:00",
+                    "interview_end_time": "2026-10-08T15:00:00",
                     "job_url": None,
                     "updated_at": "2026-09-30T16:00:00",
                     "feishu_sync_status": "pending",
@@ -74,7 +75,7 @@ class HybridApiClientTest(unittest.TestCase):
                 base_location="杭州",
                 current_status="二面",
                 interview_time="2026-10-08 14:00",
-                updated_at="2026-09-30 16:00",
+                interview_end_time="2026-10-08 15:00",
                 extensions={"source": "editable_table"},
             )
         finally:
@@ -82,6 +83,8 @@ class HybridApiClientTest(unittest.TestCase):
 
         assert captured_body is not None
         self.assertEqual(captured_body["interview_time"], "2026-10-08T14:00")
+        self.assertEqual(captured_body["interview_end_time"], "2026-10-08T15:00")
+        self.assertNotIn("updated_at", captured_body)
         self.assertEqual(captured_body["extensions"]["source"], "editable_table")
 
     def test_backend_error_is_user_readable(self) -> None:

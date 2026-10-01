@@ -23,6 +23,7 @@ class ApplicationModelTest(unittest.TestCase):
         self.assertIn("base_location", columns)
         self.assertIn("current_status", columns)
         self.assertIn("interview_time", columns)
+        self.assertIn("interview_end_time", columns)
         self.assertIn("job_url", columns)
         self.assertNotIn("next_action", columns)
 

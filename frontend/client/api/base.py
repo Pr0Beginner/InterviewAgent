@@ -103,7 +103,7 @@ class ApiClient(ABC):
         base_location: str,
         current_status: str,
         interview_time: str | None,
-        updated_at: str,
+        interview_end_time: str | None,
         extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """保存投递表格中一行的所有可编辑字段。
@@ -114,8 +114,8 @@ class ApiClient(ABC):
             position_name: 表格中显示的岗位名称。
             base_location: 表格中显示的工作地点。
             current_status: 选中的投递状态。
-            interview_time: 选中的面试时间，无时间时为 None。
-            updated_at: 表格中显示的更新时间。
+            interview_time: 选中的开始时间，无时间时为 None。
+            interview_end_time: 选中的结束时间，无时间时为 None。
             extensions: 用于后续兼容的可选请求扩展参数。
         
         返回值:

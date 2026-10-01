@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from backend.app.models import ApplicationStatusHistory, JobApplication
@@ -82,7 +82,11 @@ class InterviewRepository:
             self.session.scalars(
                 select(JobApplication)
                 .where(*item_filters)
-                .order_by(JobApplication.updated_at.desc(), JobApplication.id.desc())
+                .order_by(
+                    case((JobApplication.interview_time.is_(None), 1), else_=0),
+                    JobApplication.interview_time.desc(),
+                    JobApplication.id.desc(),
+                )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

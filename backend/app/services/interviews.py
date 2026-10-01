@@ -79,7 +79,8 @@ class InterviewService:
         application.base_location = request.base_location
         application.current_status = request.current_status.value
         application.interview_time = request.interview_time
-        application.updated_at = request.updated_at
+        application.interview_end_time = request.interview_end_time
+        application.updated_at = datetime.now()
 
         if previous_status != application.current_status:
             self.repository.add_status_history(

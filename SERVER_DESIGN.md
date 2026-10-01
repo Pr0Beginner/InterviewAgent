@@ -196,20 +196,21 @@ ReAct 根据用户意图选择工具、生成参数；查询和更新工具再�
 | `position_name` | Body | string | 是 | 岗位名称 |
 | `base_location` | Body | string | 是 | 工作地点 |
 | `current_status` | Body | string | 否 | 十种状态之一，默认简历筛选中 |
-| `interview_time` | Body | string/null | 否 | 面试时间，ISO 8601 |
+| `interview_time` | Body | string/null | 否 | 开始时间，ISO 8601 |
+| `interview_end_time` | Body | string/null | 否 | 结束时间，ISO 8601 |
 | `job_url` | Body | string/null | 否 | 原始 HTTP/HTTPS 岗位链接 |
 | `extensions` | Body | object | 否 | 请求扩展 Map |
 
 | 响应参数名 | 类型 | 含义 |
 |---|---|---|
-| `id`、`company_name`、`position_name`、`base_location`、`current_status`、`interview_time`、`job_url`、`updated_at` | 同下方列表记录 | 已保存记录 |
+| `id`、`company_name`、`position_name`、`base_location`、`current_status`、`interview_time`、`interview_end_time`、`job_url`、`updated_at` | 同下方列表记录 | 已保存记录 |
 | `previous_status` | null | 新建时没有旧状态 |
 | `feishu_sync_status` | string | `success` 或 `pending` |
 | `sync_message` | string | 待同步原因，仅失败时返回 |
 
 #### `GET /api/interviews`
 
-作用：查询当前投递和面试状态。
+作用：查询当前投递和面试状态；记录按开始时间降序排列，没有开始时间的记录排在最后。
 
 请求参数：
 
@@ -231,7 +232,8 @@ ReAct 根据用户意图选择工具、生成参数；查询和更新工具再�
 | `items[].position_name` | string | 岗位名称 |
 | `items[].base_location` | string | 工作地点 |
 | `items[].current_status` | string | 当前状态：`已投递`、`简历筛选中`、`笔试中`、`待面试`、`一面`、`二面`、`三面`、`HR面`、`Offer`、`已结束` |
-| `items[].interview_time` | string/null | 最近一次面试时间 |
+| `items[].interview_time` | string/null | 开始时间 |
+| `items[].interview_end_time` | string/null | 结束时间 |
 | `items[].job_url` | string/null | 岗位原始链接 |
 | `items[].updated_at` | string | 最近更新时间 |
 | `total` | integer | 记录总数 |
@@ -255,10 +257,10 @@ ReAct 根据用户意图选择工具、生成参数；查询和更新工具再�
 | `company_name` | Body | string | 是 | 公司名称 |
 | `position_name` | Body | string | 是 | 岗位名称 |
 | `base_location` | Body | string | 是 | 工作地点 |
-| `current_status` | Body | string | 是 | 当前状态，取值为约定的 8 种投递状态之一 |
-| `interview_time` | Body | string/null | 是 | 面试时间，ISO 8601 格式；没有时为 `null` |
+| `current_status` | Body | string | 是 | 当前状态，取值为系统支持的十种投递状态之一 |
+| `interview_time` | Body | string/null | 是 | 开始时间，ISO 8601 格式；没有时为 `null` |
+| `interview_end_time` | Body | string/null | 是 | 结束时间，ISO 8601 格式；没有时为 `null` |
 | `extensions` | Body | object | 否 | 扩展字段 Map；未约定的键不影响基础业务字段 |
-| `updated_at` | Body | string | 是 | 客户端展示的更新时间，ISO 8601 格式 |
 
 响应参数：
 
@@ -269,7 +271,8 @@ ReAct 根据用户意图选择工具、生成参数；查询和更新工具再�
 | `position_name` | string | 保存后的岗位名称 |
 | `base_location` | string | 保存后的工作地点 |
 | `current_status` | string | 保存后的状态 |
-| `interview_time` | string/null | 保存后的面试时间 |
+| `interview_time` | string/null | 保存后的开始时间 |
+| `interview_end_time` | string/null | 保存后的结束时间 |
 | `updated_at` | string | 保存后的更新时间 |
 | `feishu_sync_status` | string | 飞书同步状态：`success`、`pending`、`failed` |
 

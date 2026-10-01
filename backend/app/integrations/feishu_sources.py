@@ -185,6 +185,7 @@ class FeishuSources:
             selected = future[:1] or sorted(matches, key=lambda event: event["start_time"], reverse=True)[:1]
             if selected:
                 row["interview_time"] = selected[0]["start_time"]
+                row["interview_end_time"] = selected[0]["end_time"]
                 row["schedule_record_id"] = selected[0]["record_id"]
         result["needs_review"] = [{"source_id": row["id"], "company_name": row["company_name"], "raw_status": row["raw_status"],
                                    "reason": "飞书进度状态无法映射到系统状态"} for row in result["records"] if row["current_status"] is None]
@@ -258,7 +259,9 @@ class FeishuSources:
                 field = PROGRESS_HEADERS[header]
                 if value != other[field]:
                     writes.append({"sheet_id": target["sheet_id"], "range": f"{current['columns'][header]}{other['source_row']}", "cells": [[{"value": value}]]})
-            if local_time(row.get("interview_time")) != other.get("interview_time"):
+            start_changed = local_time(row.get("interview_time")) != other.get("interview_time")
+            end_changed = local_time(row.get("interview_end_time")) != other.get("interview_end_time")
+            if start_changed or end_changed:
                 schedule = current["schedule"]
                 if schedule["status"] != "success" or not other.get("schedule_record_id"):
                     raise ApplicationError("FEISHU_DATE_AMBIGUOUS", "变更的日期没有唯一对应的飞书安排，请先核对日期表。", status_code=409)
@@ -266,9 +269,15 @@ class FeishuSources:
                     raise ApplicationError("FEISHU_DATE_ROUND", "新轮次不能覆盖上一轮的日期，请先在日期表新增对应安排。", status_code=409)
                 event = next(item for item in schedule["events"] if item["record_id"] == other["schedule_record_id"])
                 start_time = local_time(row.get("interview_time"))
-                if start_time and event["end_time"] and start_time >= event["end_time"]:
-                    raise ApplicationError("FEISHU_TIME_RANGE", "新开始时间不早于原结束时间，请先确认完整时间范围。", status_code=409)
-                date_updates[other["schedule_record_id"]] = {"开始时间": row.get("interview_time")}
+                end_time = local_time(row.get("interview_end_time"))
+                if start_time and end_time and start_time > end_time:
+                    raise ApplicationError("FEISHU_TIME_RANGE", "结束时间早于开始时间，请先确认完整时间范围。", status_code=409)
+                fields = {}
+                if start_changed:
+                    fields["开始时间"] = row.get("interview_time")
+                if end_changed:
+                    fields["结束时间"] = row.get("interview_end_time")
+                date_updates[other["schedule_record_id"]] = fields
         latest = self.client._run(["sheets", "+revision-get", "--spreadsheet-token", target["token"]])
         if latest.get("revision") != current["revision_id"]:
             raise ApplicationError("FEISHU_CONFLICT", "飞书进度表被手动修改，请重新同步。", status_code=409)
@@ -289,5 +298,8 @@ class FeishuSources:
         observed = self.read()
         for row in records:
             matches = [other for other in observed["records"] if business_key(row) == business_key(other)]
-            if len(matches) != 1 or matches[0]["current_status"] != row["current_status"] or local_time(matches[0].get("interview_time")) != local_time(row.get("interview_time")):
+            if (len(matches) != 1
+                    or matches[0]["current_status"] != row["current_status"]
+                    or local_time(matches[0].get("interview_time")) != local_time(row.get("interview_time"))
+                    or local_time(matches[0].get("interview_end_time")) != local_time(row.get("interview_end_time"))):
                 raise ApplicationError("FEISHU_VERIFY_FAILED", "飞书进度回读校验失败，保留待同步记录。", status_code=502)

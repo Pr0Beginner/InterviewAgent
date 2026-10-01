@@ -5,6 +5,7 @@ from html import escape
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -65,12 +66,19 @@ class MockInterviewPage(QWidget):
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
-        settings = QHBoxLayout()
+        settings_panel = QFrame()
+        settings_panel.setObjectName("InterviewSettings")
+        settings = QHBoxLayout(settings_panel)
+        settings.setContentsMargins(14, 12, 14, 12)
+        settings.setSpacing(10)
         self.company_combo = QComboBox()
         self.company_combo.addItems(self.TARGET_COMPANIES)
-        self.position_input = QLineEdit("Java 后端开发工程师")
+        self.company_combo.setFixedWidth(210)
+        self.position_input = QLineEdit("AI全栈开发工程师")
+        self.position_input.setFixedWidth(240)
         self.round_combo = QComboBox()
         self.round_combo.addItems(["一面", "二面", "技术终面", "HR 面"])
+        self.round_combo.setFixedWidth(130)
         start_button = self.start_button = QPushButton("开始面试")
         start_button.setObjectName("PrimaryButton")
         start_button.clicked.connect(self._start_interview)
@@ -82,17 +90,20 @@ class MockInterviewPage(QWidget):
         self.restore_button.setObjectName("SecondaryButton")
         self.restore_button.clicked.connect(self._restore)
         settings.addWidget(self.restore_button)
-        layout.addLayout(settings)
+        settings.addStretch()
+        layout.addWidget(settings_panel)
         self.notice = QLabel()
         self.notice.setWordWrap(True)
         self.notice.setObjectName("MutedLabel")
         layout.addWidget(self.notice)
 
         self.transcript = QTextBrowser()
+        self.transcript.setObjectName("InterviewTranscript")
         self.transcript.setHtml("<p style='color:#817B91'>配置目标岗位后开始模拟面试。</p>")
         layout.addWidget(self.transcript, 1)
 
         self.answer_input = QPlainTextEdit()
+        self.answer_input.setObjectName("InterviewAnswer")
         self.answer_input.setPlaceholderText("输入你的回答")
         self.answer_input.setFixedHeight(110)
         layout.addWidget(self.answer_input)
@@ -114,7 +125,7 @@ class MockInterviewPage(QWidget):
             return
         position_name = self.position_input.text().strip()
         if not position_name:
-            self.event_message.emit("请先填写目标岗位。")
+            self.notice.setText("请先填写目标岗位。")
             return
         self._busy("正在生成面试题…")
         self.runner.start("create_mock_interview", self._started,
@@ -123,7 +134,7 @@ class MockInterviewPage(QWidget):
             ),
             position_name=position_name,
             interview_round=self.round_combo.currentText(),
-            interview_focus=["Java", "服务端", "Agent"],
+            interview_focus=["AI应用", "全栈开发", "Agent"],
         )
 
     def _started(self, result):
@@ -139,7 +150,7 @@ class MockInterviewPage(QWidget):
             return
         answer = self.answer_input.toPlainText().strip()
         if not self.session_id or not self.question_id:
-            self.event_message.emit("请先开始模拟面试。")
+            self.notice.setText("请先开始模拟面试。")
             return
         if not answer:
             return
@@ -164,7 +175,7 @@ class MockInterviewPage(QWidget):
         if self.runner.busy:
             return
         if not self.session_id:
-            self.event_message.emit("当前没有进行中的模拟面试。")
+            self.notice.setText("当前没有进行中的模拟面试。")
             return
         self._busy("正在生成总结…")
         self.runner.start("finish_mock_interview", self._finished_interview, session_id=self.session_id)
@@ -195,7 +206,7 @@ class MockInterviewPage(QWidget):
         self.session_id = result["session_id"]
         context = result.get("context", {})
         self.company_combo.setCurrentText(context.get("company_name") or self.TARGET_COMPANIES[0])
-        self.position_input.setText(context.get("position_name", "Java 后端开发工程师"))
+        self.position_input.setText(context.get("position_name", "AI全栈开发工程师"))
         self.round_combo.setCurrentText(context.get("interview_round", "一面"))
         self.transcript.clear()
         for turn in result["turns"]:

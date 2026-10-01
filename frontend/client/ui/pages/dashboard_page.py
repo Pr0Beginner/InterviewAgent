@@ -82,7 +82,7 @@ class DashboardPage(QWidget):
     STATUS_OPTIONS = ["已投递", "简历筛选中", "笔试中", "待面试", "一面", "二面", "三面", "HR面", "Offer", "已结束"]
     SUMMARY_CARDS = [
         ("全部投递", "全部"),
-        ("已投递", "已投递"),
+        ("笔试中", "笔试中"),
         ("待面试", "待面试"),
         ("Offer", "Offer"),
     ]
@@ -92,8 +92,8 @@ class DashboardPage(QWidget):
     POSITION_COLUMN = 2
     BASE_COLUMN = 3
     STATUS_COLUMN = 4
-    INTERVIEW_TIME_COLUMN = 5
-    UPDATED_AT_COLUMN = 6
+    START_TIME_COLUMN = 5
+    END_TIME_COLUMN = 6
     DEFAULT_PAGE_SIZE = 10
 
     def __init__(self, api: ApiClient, parent=None) -> None:
@@ -163,6 +163,7 @@ class DashboardPage(QWidget):
         self.filter_combo = QComboBox()
         self.filter_combo.setObjectName("StatusFilter")
         self.filter_combo.addItems(["全部", *self.STATUS_OPTIONS])
+        _configure_status_combo(self.filter_combo)
         _color_status_items(self.filter_combo)
         _apply_status_tone(self.filter_combo, "全部")
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
@@ -185,7 +186,7 @@ class DashboardPage(QWidget):
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["", "公司", "岗位", "Base", "当前状态", "面试时间", "更新时间"]
+            ["", "公司", "岗位", "Base", "当前状态", "开始时间", "结束时间"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -211,8 +212,8 @@ class DashboardPage(QWidget):
             self.POSITION_COLUMN: 220,
             self.BASE_COLUMN: 100,
             self.STATUS_COLUMN: 150,
-            self.INTERVIEW_TIME_COLUMN: 190,
-            self.UPDATED_AT_COLUMN: 190,
+            self.START_TIME_COLUMN: 190,
+            self.END_TIME_COLUMN: 190,
         }.items():
             header_view.resizeSection(column, width)
         layout.addWidget(self.table, 1)
@@ -283,6 +284,7 @@ class DashboardPage(QWidget):
             status_combo = QComboBox()
             status_combo.setObjectName("TableEditor")
             status_combo.addItems(self.STATUS_OPTIONS)
+            _configure_status_combo(status_combo)
             _color_status_items(status_combo)
             if record["current_status"] not in self.STATUS_OPTIONS:
                 status_combo.addItem(record["current_status"])
@@ -295,27 +297,25 @@ class DashboardPage(QWidget):
             )
             self.table.setCellWidget(row, self.STATUS_COLUMN, status_combo)
 
-            interview_time = OptionalDateTimeEdit(record["interview_time"])
-            interview_time.setObjectName("TableEditor")
-            _update_datetime_tooltip(interview_time, allow_empty=True)
-            interview_time.dateTimeChanged.connect(
-                lambda _value, record_id=interview_id, editor=interview_time: self._on_datetime_changed(
-                    record_id, editor, allow_empty=True
+            start_time = OptionalDateTimeEdit(record.get("interview_time"))
+            start_time.setObjectName("TableEditor")
+            _update_datetime_tooltip(start_time, allow_empty=True, empty_name="开始时间")
+            start_time.dateTimeChanged.connect(
+                lambda _value, record_id=interview_id, editor=start_time: self._on_datetime_changed(
+                    record_id, editor, allow_empty=True, empty_name="开始时间"
                 )
             )
-            self.table.setCellWidget(row, self.INTERVIEW_TIME_COLUMN, interview_time)
+            self.table.setCellWidget(row, self.START_TIME_COLUMN, start_time)
 
-            updated_at = QDateTimeEdit(_parse_datetime(record["updated_at"]))
-            updated_at.setObjectName("TableEditor")
-            updated_at.setCalendarPopup(True)
-            updated_at.setDisplayFormat("yyyy-MM-dd HH:mm")
-            _update_datetime_tooltip(updated_at)
-            updated_at.dateTimeChanged.connect(
-                lambda _value, record_id=interview_id, editor=updated_at: self._on_datetime_changed(
-                    record_id, editor
+            end_time = OptionalDateTimeEdit(record.get("interview_end_time"))
+            end_time.setObjectName("TableEditor")
+            _update_datetime_tooltip(end_time, allow_empty=True, empty_name="结束时间")
+            end_time.dateTimeChanged.connect(
+                lambda _value, record_id=interview_id, editor=end_time: self._on_datetime_changed(
+                    record_id, editor, allow_empty=True, empty_name="结束时间"
                 )
             )
-            self.table.setCellWidget(row, self.UPDATED_AT_COLUMN, updated_at)
+            self.table.setCellWidget(row, self.END_TIME_COLUMN, end_time)
 
         self._loading = False
         self._update_save_state()
@@ -339,8 +339,9 @@ class DashboardPage(QWidget):
         interview_id: int,
         editor: QDateTimeEdit,
         allow_empty: bool = False,
+        empty_name: str = "时间",
     ) -> None:
-        _update_datetime_tooltip(editor, allow_empty=allow_empty)
+        _update_datetime_tooltip(editor, allow_empty=allow_empty, empty_name=empty_name)
         self._mark_record_changed(interview_id)
 
     def _mark_record_changed(self, interview_id: int) -> None:
@@ -360,19 +361,19 @@ class DashboardPage(QWidget):
     def _record_from_row(self, row: int) -> dict:
         interview_id = self._record_id_for_row(row)
         status_editor = self.table.cellWidget(row, self.STATUS_COLUMN)
-        interview_time_editor = self.table.cellWidget(row, self.INTERVIEW_TIME_COLUMN)
-        updated_at_editor = self.table.cellWidget(row, self.UPDATED_AT_COLUMN)
+        start_time_editor = self.table.cellWidget(row, self.START_TIME_COLUMN)
+        end_time_editor = self.table.cellWidget(row, self.END_TIME_COLUMN)
         assert isinstance(status_editor, QComboBox)
-        assert isinstance(interview_time_editor, OptionalDateTimeEdit)
-        assert isinstance(updated_at_editor, QDateTimeEdit)
+        assert isinstance(start_time_editor, OptionalDateTimeEdit)
+        assert isinstance(end_time_editor, OptionalDateTimeEdit)
         return {
             "id": interview_id,
             "company_name": self._item_text(row, self.COMPANY_COLUMN),
             "position_name": self._item_text(row, self.POSITION_COLUMN),
             "base_location": self._item_text(row, self.BASE_COLUMN),
             "current_status": status_editor.currentText(),
-            "interview_time": interview_time_editor.value(),
-            "updated_at": updated_at_editor.dateTime().toString("yyyy-MM-dd HH:mm"),
+            "interview_time": start_time_editor.value(),
+            "interview_end_time": end_time_editor.value(),
         }
 
     def save_changes(self) -> bool:
@@ -392,7 +393,7 @@ class DashboardPage(QWidget):
                     base_location=record["base_location"],
                     current_status=record["current_status"],
                     interview_time=record["interview_time"],
-                    updated_at=record["updated_at"],
+                    interview_end_time=record["interview_end_time"],
                 )
         except Exception as exc:  # HTTP 客户端负责将底层错误转换为用户可读的接口错误。
             QMessageBox.critical(self, "保存失败", f"修改未能保存：{exc}")
@@ -606,7 +607,7 @@ def _parse_datetime(value: str | None) -> QDateTime:
 def _normalize_record(record: dict) -> dict:
     normalized = deepcopy(record)
     normalized["interview_time"] = _normalized_datetime_text(record.get("interview_time"))
-    normalized["updated_at"] = _normalized_datetime_text(record.get("updated_at")) or ""
+    normalized["interview_end_time"] = _normalized_datetime_text(record.get("interview_end_time"))
     return {
         key: normalized.get(key)
         for key in (
@@ -616,7 +617,7 @@ def _normalize_record(record: dict) -> dict:
             "base_location",
             "current_status",
             "interview_time",
-            "updated_at",
+            "interview_end_time",
         )
     }
 
@@ -663,10 +664,18 @@ def _color_status_items(combo: QComboBox) -> None:
             combo.setItemData(index, QColor("#F0EEF3"), Qt.ItemDataRole.BackgroundRole)
 
 
+def _configure_status_combo(combo: QComboBox) -> None:
+    """限制状态弹层高度，并允许通过滚轮或滚动条浏览全部状态。"""
+    combo.setMaxVisibleItems(6)
+    combo.view().setMaximumHeight(240)
+    combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    combo.view().setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
+
 def _update_datetime_tooltip(
-    editor: QDateTimeEdit, allow_empty: bool = False
+    editor: QDateTimeEdit, allow_empty: bool = False, empty_name: str = "时间"
 ) -> None:
     if allow_empty and isinstance(editor, OptionalDateTimeEdit) and editor.value() is None:
-        editor.setToolTip("无面试时间；点击选择，按 Delete 或 Backspace 清空")
+        editor.setToolTip(f"无{empty_name}；点击选择，按 Delete 或 Backspace 清空")
         return
     editor.setToolTip(editor.dateTime().toString("yyyy-MM-dd HH:mm"))

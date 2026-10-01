@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from client.api.mock_api import MockApiClient
 from client.ui.main_window import MainWindow
+from client.ui.pages.dashboard_page import DashboardPage, OptionalDateTimeEdit
 from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble
 
 
@@ -94,6 +95,32 @@ class AgentPanelTest(unittest.TestCase):
         self.assertEqual(window.content_splitter.count(), 2)
         self.assertGreater(window.agent_panel.width(), initial_width)
         window.close()
+
+    def test_mock_interview_page_hides_agent_panel(self):
+        """模拟面试页面使用完整内容宽度，不显示右侧通用 Agent。"""
+        window = MainWindow(MockApiClient())
+        window.show()
+        window._navigate_to(2, window.nav_buttons[2])
+        self.app.processEvents()
+        self.assertFalse(window.agent_panel.isVisible())
+        self.assertEqual(window.mock_page.position_input.text(), "AI全栈开发工程师")
+        window._navigate_to(0, window.nav_buttons[0])
+        self.app.processEvents()
+        self.assertTrue(window.agent_panel.isVisible())
+        window.close()
+
+    def test_dashboard_uses_scrollable_status_and_start_end_time_editors(self):
+        """投递页按开始时间降序展示，并用时间选择器编辑起止时间。"""
+        page = DashboardPage(MockApiClient())
+        self.assertEqual(page.SUMMARY_CARDS[1], ("笔试中", "笔试中"))
+        self.assertEqual(page.table.horizontalHeaderItem(page.START_TIME_COLUMN).text(), "开始时间")
+        self.assertEqual(page.table.horizontalHeaderItem(page.END_TIME_COLUMN).text(), "结束时间")
+        self.assertEqual(page.table.item(0, page.COMPANY_COLUMN).text(), "百度")
+        self.assertIsInstance(page.table.cellWidget(0, page.START_TIME_COLUMN), OptionalDateTimeEdit)
+        self.assertIsInstance(page.table.cellWidget(0, page.END_TIME_COLUMN), OptionalDateTimeEdit)
+        self.assertEqual(page.filter_combo.maxVisibleItems(), 6)
+        self.assertEqual(page.table.cellWidget(0, page.STATUS_COLUMN).maxVisibleItems(), 6)
+        page.close()
 
     def test_agent_reply_renders_markdown_and_escapes_raw_html(self):
         """助手回复支持 Markdown，同时不执行模型返回的原始 HTML。"""

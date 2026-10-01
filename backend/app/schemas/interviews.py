@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models.enums import InterviewStatus
 from backend.app.schemas.common import ExtensibleRequest
@@ -19,7 +19,8 @@ class InterviewRecord(BaseModel):
     position_name: str = Field(description="岗位名称。")
     base_location: str = Field(description="岗位工作地点。")
     current_status: InterviewStatus = Field(description="当前投递或面试状态。")
-    interview_time: datetime | None = Field(description="最近一次面试时间；没有时为空。")
+    interview_time: datetime | None = Field(description="笔试或面试开始时间；没有时为空。")
+    interview_end_time: datetime | None = Field(description="笔试或面试结束时间；没有时为空。")
     job_url: str | None = Field(description="岗位原始链接；没有时为空。")
     updated_at: datetime = Field(description="记录最近更新时间。")
 
@@ -51,8 +52,21 @@ class InterviewUpdateRequest(ExtensibleRequest):
     position_name: str = Field(min_length=1, max_length=255, description="岗位名称。")
     base_location: str = Field(min_length=1, max_length=100, description="岗位工作地点。")
     current_status: InterviewStatus = Field(description="保存后的投递状态。")
-    interview_time: datetime | None = Field(description="面试时间；清空时传 null。")
-    updated_at: datetime = Field(description="客户端表格中的更新时间。")
+    interview_time: datetime | None = Field(description="开始时间；清空时传 null。")
+    interview_end_time: datetime | None = Field(description="结束时间；清空时传 null。")
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        """结束时间存在时必须晚于或等于开始时间。"""
+        if self.interview_end_time is not None and self.interview_time is None:
+            raise ValueError("设置结束时间前必须先设置开始时间")
+        if (
+            self.interview_time is not None
+            and self.interview_end_time is not None
+            and self.interview_end_time < self.interview_time
+        ):
+            raise ValueError("结束时间不能早于开始时间")
+        return self
 
 
 class InterviewUpdateResponse(InterviewRecord):

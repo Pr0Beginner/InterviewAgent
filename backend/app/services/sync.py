@@ -98,10 +98,10 @@ def _sync_native(factory, client, current: dict, export_id: str, direction: str)
             if len(other) != 1:
                 raise ApplicationError("FEISHU_RECORD_AMBIGUOUS", "待同步记录没有唯一对应的飞书进度行，未执行写入。", status_code=409)
             # 只检查本次会推送的记录，其他人的编辑或不相关行不会引发整表覆盖。
-            for field in ("current_status", "interview_time"):
+            for field in ("current_status", "interview_time", "interview_end_time"):
                 remote_value = other[0].get(field)
                 local_value = desired.get(field)
-                if field == "interview_time":
+                if field in {"interview_time", "interview_end_time"}:
                     remote_value, local_value = local_time(remote_value), local_time(local_value)
                 if remote_value != local_value and (not old or remote_value != old[0].get(field)):
                     raise ApplicationError("FEISHU_CONFLICT", "飞书记录被手动修改或尚无同步基线，请核对后再操作。", status_code=409)
@@ -127,8 +127,10 @@ def _sync_native(factory, client, current: dict, export_id: str, direction: str)
                 else:
                     previous_status = row.current_status
                 time = datetime.fromisoformat(remote["interview_time"]) if remote.get("interview_time") else None
-                changed = previous_status != remote["current_status"] or row.interview_time != time
-                row.current_status, row.interview_time = remote["current_status"], time
+                end_time = datetime.fromisoformat(remote["interview_end_time"]) if remote.get("interview_end_time") else None
+                changed = (previous_status != remote["current_status"] or row.interview_time != time
+                           or row.interview_end_time != end_time)
+                row.current_status, row.interview_time, row.interview_end_time = remote["current_status"], time, end_time
                 if previous_status != row.current_status:
                     session.add(ApplicationStatusHistory(application_id=row.id, previous_status=previous_status, current_status=row.current_status,
                                                          change_source="feishu", note="从原进度表导入；未注明的岗位和地点留空"))

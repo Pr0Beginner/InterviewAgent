@@ -40,6 +40,7 @@ class JobApplication(Base):
     base_location: Mapped[str] = mapped_column(String(100), nullable=False)
     current_status: Mapped[str] = mapped_column(String(32), nullable=False)
     interview_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    interview_end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     job_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

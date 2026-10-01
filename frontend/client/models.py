@@ -12,6 +12,7 @@ class InterviewRecord:
     base_location: str
     current_status: str
     interview_time: str | None = None
+    interview_end_time: str | None = None
     job_url: str | None = None
     updated_at: str = ""
 

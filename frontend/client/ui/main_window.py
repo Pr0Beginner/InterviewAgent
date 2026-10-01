@@ -77,13 +77,11 @@ class MainWindow(QMainWindow):
         mock_interview = self.mock_page = MockInterviewPage(self.api)
         self.dashboard.event_message.connect(self.agent_panel.add_system_message)
         jobs.event_message.connect(self.agent_panel.add_system_message)
-        mock_interview.event_message.connect(self.agent_panel.add_system_message)
 
         self.pages.addWidget(self.dashboard)
         self.pages.addWidget(jobs)
         self.pages.addWidget(mock_interview)
         self.pages.currentChanged.connect(self._update_agent_page_context)
-        self._update_agent_page_context(self.pages.currentIndex())
 
         navigation = [
             ("投递状态", "grid", 0),
@@ -127,6 +125,7 @@ class MainWindow(QMainWindow):
         self.content_splitter.setStretchFactor(0, 1)
         self.content_splitter.setStretchFactor(1, 0)
         self.content_splitter.setSizes([1080, 370])
+        self._update_agent_page_context(self.pages.currentIndex())
 
         root_layout.addWidget(sidebar)
         root_layout.addWidget(self.content_splitter, 1)
@@ -145,6 +144,10 @@ class MainWindow(QMainWindow):
     def _update_agent_page_context(self, page: int) -> None:
         page_context = self.PAGE_CONTEXT_BY_INDEX.get(page, "applications")
         self.agent_panel.set_page_context(page_context)
+        show_agent = page != 2
+        self.agent_panel.setVisible(show_agent)
+        if show_agent:
+            self.content_splitter.setSizes([1080, 370])
 
     def _refresh_after_agent(self) -> None:
         """刷新对话产生的业务变更，不丢弃表格中尚未保存的本地编辑。"""

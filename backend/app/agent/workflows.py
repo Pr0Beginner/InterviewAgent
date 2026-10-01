@@ -135,7 +135,8 @@ class InterviewWorkflows:
                     raise ApplicationError("APPLICATION_EXISTS", "该公司、岗位与 Base 已有记录，请先查询。", status_code=409)
                 row = JobApplication(company_name=request.company_name, position_name=request.position_name,
                     base_location=request.base_location, current_status=request.current_status.value,
-                    interview_time=request.interview_time, job_url=str(request.job_url) if request.job_url else None)
+                    interview_time=request.interview_time, interview_end_time=request.interview_end_time,
+                    job_url=str(request.job_url) if request.job_url else None)
                 session.add(row)
                 session.flush()
                 previous_status = None
@@ -158,9 +159,15 @@ class InterviewWorkflows:
                     row.current_status = request.target_status.value
                 if "interview_time" in request.model_fields_set:
                     row.interview_time = request.interview_time
+                if "interview_end_time" in request.model_fields_set:
+                    row.interview_end_time = request.interview_end_time
                 if "job_url" in request.model_fields_set:
                     row.job_url = str(request.job_url) if request.job_url else None
                 note = request.note
+            if row.interview_end_time is not None and row.interview_time is None:
+                raise ApplicationError("INTERVIEW_TIME_RANGE", "设置结束时间前必须先设置开始时间。", status_code=422)
+            if row.interview_time is not None and row.interview_end_time is not None and row.interview_end_time < row.interview_time:
+                raise ApplicationError("INTERVIEW_TIME_RANGE", "结束时间不能早于开始时间。", status_code=422)
             row.updated_at = datetime.now()
             if previous_status != row.current_status:
                 session.add(ApplicationStatusHistory(application_id=row.id, previous_status=previous_status,

@@ -55,12 +55,13 @@ class FeishuSourceTest(unittest.TestCase):
     def test_invitation_keeps_pending_status_with_an_explicit_future_date(self):
         """未来安排只补充时间；尚未参加时仍保持待面试状态。"""
         progress = {"records": [{"id": "r", "company_name": "BIGO", "position_name": "", "current_status": "待面试", "raw_status": "待面试"}]}
-        schedule = {"status": "success", "events": [{"record_id": "date", "title": "BIGO 一面", "position_name": "", "start_time": "2099-10-08T17:30:00", "end_time": None}]}
+        schedule = {"status": "success", "events": [{"record_id": "date", "title": "BIGO 一面", "position_name": "", "start_time": "2099-10-08T17:30:00", "end_time": "2099-10-08T18:30:00"}]}
         with patch.object(self.sources, "_progress", return_value=progress), patch.object(self.sources, "read_schedule", return_value=schedule):
             result = self.sources.read()
         self.assertEqual(result["records"][0]["current_status"], "待面试")
         self.assertEqual(result["records"][0]["raw_status"], "待面试")
         self.assertEqual(result["records"][0]["interview_time"], "2099-10-08T17:30:00")
+        self.assertEqual(result["records"][0]["interview_end_time"], "2099-10-08T18:30:00")
 
     def test_experience_follows_index_and_stops_before_another_owner(self):
         """只请求 ZMY 章节，即使返回范围出现其他标题也停止处理。"""
@@ -138,7 +139,8 @@ class NativeFeishu:
         self.writes += 1
         for row in rows:
             other = next(item for item in self.records if business_key(item) == business_key(row))
-            other.update(current_status=row["current_status"], interview_time=row["interview_time"])
+            other.update(current_status=row["current_status"], interview_time=row["interview_time"],
+                         interview_end_time=row.get("interview_end_time"))
 
 
 class NativeSyncTest(StoreTest):
