@@ -7,7 +7,7 @@ import re
 from threading import Event
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QKeyEvent, QTextDocumentFragment
 from PySide6.QtWidgets import (
     QFrame,
@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from client.api.base import ApiClient
+from client.ui.icons import app_icon
+from client.ui.widgets.glass import soft_shadow
 
 
 class ChatWorker(QThread):
@@ -94,19 +96,22 @@ class AgentPanel(QFrame):
     idle = Signal()
     PAGE_CONTEXTS = {
         "applications": {
-            "title": "投递状态",
+            "title": "投递进度",
             "subtitle": "查询状态、更新进度或询问下一步",
             "placeholder": "输入消息，例如：我目前有哪些面试？",
+            "suggestions": ["查看待面试的公司", "梳理需要跟进的投递", "总结当前投递进度"],
         },
         "recommendations": {
             "title": "推荐岗位",
             "subtitle": "分析匹配度、JD 和投递优先级",
             "placeholder": "输入消息，例如：哪个岗位最值得优先投递？",
+            "suggestions": ["哪些岗位更适合我？", "分析岗位的技术要求", "帮我安排投递优先级"],
         },
         "mock_interview": {
             "title": "模拟面试",
             "subtitle": "围绕目标公司和岗位进行面试训练",
             "placeholder": "输入消息，例如：先从 Java 基础开始面试",
+            "suggestions": ["帮我制定面试准备计划", "梳理项目亮点", "从 Java 基础开始练习"],
         },
     }
 
@@ -127,7 +132,7 @@ class AgentPanel(QFrame):
         self.setMaximumWidth(720)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 22, 20, 20)
+        layout.setContentsMargins(22, 24, 22, 22)
         layout.setSpacing(14)
 
         heading = QHBoxLayout()
@@ -136,12 +141,11 @@ class AgentPanel(QFrame):
         title = QLabel("Agent 助手")
         title.setObjectName("AgentTitle")
         self.subtitle = QLabel()
-        self.subtitle.setObjectName("MutedLabel")
+        self.subtitle.setObjectName("ContextBadge")
         self.subtitle.setWordWrap(True)
-        online = QLabel("● 就绪")
+        online = self.status_label = QLabel("● 就绪")
         online.setObjectName("OnlineLabel")
         title_group.addWidget(title)
-        title_group.addWidget(self.subtitle)
         heading.addLayout(title_group)
         heading.addStretch()
         heading.addWidget(online, 0, Qt.AlignmentFlag.AlignTop)
@@ -149,11 +153,44 @@ class AgentPanel(QFrame):
         self.messages = QTextBrowser()
         self.messages.setObjectName("AgentMessages")
         self.messages.setOpenExternalLinks(True)
-        self._render_messages()
+
+        self.welcome = QFrame()
+        welcome_layout = QVBoxLayout(self.welcome)
+        welcome_layout.setContentsMargins(0, 0, 0, 0)
+        welcome_layout.setSpacing(12)
+        welcome_layout.addStretch(2)
+        mark = self.welcome_mark = QLabel()
+        mark.setObjectName("AssistantMark")
+        mark.setFixedSize(64, 64)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setPixmap(app_icon("spark", "#987BD6").pixmap(QSize(32, 32)))
+        soft_shadow(mark, blur=22, opacity=20, offset=6)
+        welcome_layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignLeft)
+        welcome_layout.addSpacing(6)
+        welcome_title = QLabel("准备好下一步")
+        welcome_title.setObjectName("WelcomeTitle")
+        welcome_layout.addWidget(welcome_title)
+        welcome_detail = self.welcome_detail = QLabel("梳理投递进度，找到值得关注的机会。")
+        welcome_detail.setObjectName("WelcomeSubtitle")
+        welcome_detail.setWordWrap(True)
+        welcome_layout.addWidget(welcome_detail)
+        welcome_layout.addSpacing(12)
+        self.suggestion_buttons = []
+        for icon in ("calendar", "search", "chat"):
+            button = QPushButton()
+            button.setObjectName("SuggestionButton")
+            button.setIcon(app_icon(icon))
+            button.setIconSize(QSize(17, 17))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, source=button: self._use_suggestion(source.text()))
+            self.suggestion_buttons.append(button)
+            welcome_layout.addWidget(button)
+        welcome_layout.addStretch(3)
 
         self.input = AgentInput()
         self.input.setObjectName("AgentInput")
         self.input.setFixedHeight(88)
+        self.input.setAccessibleName("向助手提问")
         self.input.submit_requested.connect(self._submit_from_input)
 
         self.send_button = QPushButton("发送")
@@ -161,25 +198,62 @@ class AgentPanel(QFrame):
         self.send_button.clicked.connect(self._send_message)
 
         action_row = QHBoxLayout()
-        input_hint = QLabel("Enter 发送  ·  Shift + Enter 换行")
+        input_hint = QLabel("Enter 发送")
+        input_hint.setToolTip("Shift + Enter 换行")
         input_hint.setObjectName("InputHint")
         action_row.addWidget(input_hint)
         action_row.addStretch()
         action_row.addWidget(self.send_button)
 
+        self.composer = QFrame()
+        self.composer.setObjectName("Composer")
+        composer_layout = QVBoxLayout(self.composer)
+        composer_layout.setContentsMargins(12, 10, 12, 10)
+        composer_layout.setSpacing(4)
+        composer_layout.addWidget(self.input)
+        composer_layout.addLayout(action_row)
+        self.input.installEventFilter(self)
+
         layout.addLayout(heading)
+        layout.addWidget(self.subtitle)
+        layout.addWidget(self.welcome, 1)
         layout.addWidget(self.messages, 1)
-        layout.addWidget(self.input)
-        layout.addLayout(action_row)
+        layout.addWidget(self.composer)
+        self._render_messages()
         self.set_page_context(self.page_context)
+
+    def resizeEvent(self, event) -> None:
+        compact = self.height() < 650
+        self.welcome_mark.setVisible(not compact)
+        self.welcome_detail.setVisible(not compact)
+        super().resizeEvent(event)
+
+    def eventFilter(self, watched, event):
+        if watched is self.input and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            self.composer.setProperty("focused", event.type() == QEvent.Type.FocusIn)
+            self.composer.style().unpolish(self.composer)
+            self.composer.style().polish(self.composer)
+            self.composer.update()
+        return super().eventFilter(watched, event)
+
+    def _use_suggestion(self, text: str) -> None:
+        """Insert a suggested question without sending or overwriting a draft."""
+        if self.input.toPlainText().strip():
+            self.input.appendPlainText(text)
+        else:
+            self.input.setPlainText(text)
+        self.input.setFocus()
 
     def set_page_context(self, page_context: str) -> None:
         context = self.PAGE_CONTEXTS.get(page_context)
         if context is None:
             return
         self.page_context = page_context
-        self.subtitle.setText(f"当前页面：{context['title']} · {context['subtitle']}")
+        self.subtitle.setText(f"当前页面：{context['title']}")
+        self.subtitle.setToolTip(context["subtitle"])
         self.input.setPlaceholderText(context["placeholder"])
+        for button, suggestion in zip(self.suggestion_buttons, context["suggestions"]):
+            button.setText(suggestion)
 
     def add_system_message(self, content: str) -> None:
         """显示本地页面提示，不将其加入模型对话历史。"""
@@ -225,6 +299,7 @@ class AgentPanel(QFrame):
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_finished)
         self.send_button.setText("停止生成")
+        self.status_label.setText("● 处理中")
         self._worker.start()
 
     def _submit_from_input(self) -> None:
@@ -270,10 +345,14 @@ class AgentPanel(QFrame):
             worker.deleteLater()
         self.send_button.setEnabled(True)
         self.send_button.setText("发送")
+        self.status_label.setText("● 就绪")
         self.idle.emit()
 
     def _render_messages(self) -> None:
         """以 Markdown 渲染可见对话，不与各页面发送给模型的历史混用。"""
+        has_conversation = len(self._transcript) > 1
+        self.welcome.setVisible(not has_conversation)
+        self.messages.setVisible(has_conversation)
         body = "".join(
             _user_bubble(item["content"]) if item["kind"] == "user"
             else _agent_bubble(item["content"], item["label"])
@@ -281,11 +360,11 @@ class AgentPanel(QFrame):
         )
         self.messages.setHtml(
             "<style>"
-            "a{color:#6f42c9;text-decoration:none;}"
-            "code{font-family:'Cascadia Code','Consolas';color:#44365a;background:#f1eef5;}"
-            "pre{font-family:'Cascadia Code','Consolas';color:#44365a;background:#f5f3f7;"
-            "border:1px solid #e7e3eb;padding:9px;}"
-            "blockquote{color:#706a78;border-left:3px solid #c9b7ee;margin-left:2px;padding-left:9px;}"
+            "a{color:#8061BE;text-decoration:none;}"
+            "code{font-family:'Cascadia Code','Consolas';color:#414145;background:#ECEEF2;}"
+            "pre{font-family:'Cascadia Code','Consolas';color:#414145;background:#F5F5F7;"
+            "border:1px solid #E5E5EA;padding:9px;}"
+            "blockquote{color:#6E6E73;border-left:3px solid #D5C5EE;margin-left:2px;padding-left:9px;}"
             "</style>" + body
         )
         self.messages.verticalScrollBar().setValue(
@@ -297,9 +376,9 @@ def _agent_bubble(content: str, label: str = "Agent") -> str:
     """生成无厚重气泡的助手消息，正文支持安全的 Markdown 子集。"""
     return (
         "<table width='100%' cellspacing='0' cellpadding='5'>"
-        "<tr><td width='24' valign='top'><span style='color:#7c4ddb;font-size:16px'>✦</span></td>"
-        f"<td valign='top'><span style='color:#28252d;font-weight:700'>{escape(label)}</span>"
-        f"<div style='color:#514d57'>{_markdown_fragment(content)}</div></td></tr></table><br>"
+        "<tr><td width='24' valign='top'><span style='color:#987BD6;font-size:16px'>✦</span></td>"
+        f"<td valign='top'><span style='color:#1D1D1F;font-weight:700'>{escape(label)}</span>"
+        f"<div style='color:#414145'>{_markdown_fragment(content)}</div></td></tr></table><br>"
     )
 
 
@@ -307,8 +386,8 @@ def _user_bubble(content: str) -> str:
     """生成靠右的浅灰用户消息卡片，并保留 Markdown 基础格式。"""
     return (
         "<table width='86%' align='right' cellspacing='0' cellpadding='11' "
-        "style='background:#efedf1;border:1px solid #e3e0e6;'>"
-        f"<tr><td><div style='color:#343139'>{_markdown_fragment(content)}</div></td></tr></table><br>"
+        "style='background:#EEE7F9;border:0;'>"
+        f"<tr><td><div style='color:#1D1D1F'>{_markdown_fragment(content)}</div></td></tr></table><br>"
     )
 
 

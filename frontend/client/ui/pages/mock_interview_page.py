@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -18,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from client.api.base import ApiClient
 from client.ui.widgets.api_task import TaskRunner
+from client.ui.widgets.status_notice import StatusNotice
+from client.ui.widgets.glass_combo import GlassComboBox
 from PySide6.QtCore import QSettings
 
 
@@ -56,50 +57,68 @@ class MockInterviewPage(QWidget):
     def _build_ui(self) -> None:
         self.setObjectName("PageSurface")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(16)
 
         title = QLabel("模拟面试")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("选择目标岗位，Agent 将一次提出一个问题并根据回答追问")
+        subtitle = QLabel("一次专注一个问题，在回答与追问中做好准备")
         subtitle.setObjectName("PageSubtitle")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        heading = QVBoxLayout()
+        heading.setSpacing(6)
+        heading.addWidget(title)
+        heading.addWidget(subtitle)
+        layout.addLayout(heading)
 
         settings_panel = QFrame()
         settings_panel.setObjectName("InterviewSettings")
         settings = QHBoxLayout(settings_panel)
         settings.setContentsMargins(14, 12, 14, 12)
         settings.setSpacing(10)
-        self.company_combo = QComboBox()
+        self.company_combo = GlassComboBox()
         self.company_combo.addItems(self.TARGET_COMPANIES)
-        self.company_combo.setFixedWidth(210)
+        self.company_combo.setMinimumWidth(170)
+        self.company_combo.setAccessibleName("目标公司")
         self.position_input = QLineEdit("AI全栈开发工程师")
-        self.position_input.setFixedWidth(240)
-        self.round_combo = QComboBox()
+        self.position_input.setMinimumWidth(190)
+        self.position_input.setAccessibleName("目标岗位")
+        self.round_combo = GlassComboBox()
         self.round_combo.addItems(["一面", "二面", "技术终面", "HR 面"])
-        self.round_combo.setFixedWidth(130)
+        self.round_combo.setMinimumWidth(100)
+        self.round_combo.setAccessibleName("面试轮次")
         start_button = self.start_button = QPushButton("开始面试")
         start_button.setObjectName("PrimaryButton")
         start_button.clicked.connect(self._start_interview)
-        settings.addWidget(self.company_combo)
-        settings.addWidget(self.position_input)
-        settings.addWidget(self.round_combo)
+        for caption, field in (("目标公司", self.company_combo), ("目标岗位", self.position_input), ("面试轮次", self.round_combo)):
+            group = QVBoxLayout()
+            group.setSpacing(6)
+            label = QLabel(caption)
+            label.setObjectName("MutedLabel")
+            label.setBuddy(field)
+            group.addWidget(label)
+            group.addWidget(field)
+            settings.addLayout(group)
         settings.addWidget(start_button)
         self.restore_button = QPushButton("恢复上次")
         self.restore_button.setObjectName("SecondaryButton")
         self.restore_button.clicked.connect(self._restore)
         settings.addWidget(self.restore_button)
+        settings.setAlignment(start_button, Qt.AlignmentFlag.AlignBottom)
+        settings.setAlignment(self.restore_button, Qt.AlignmentFlag.AlignBottom)
         settings.addStretch()
         layout.addWidget(settings_panel)
-        self.notice = QLabel()
+        self.notice = StatusNotice()
         self.notice.setWordWrap(True)
         self.notice.setObjectName("MutedLabel")
         layout.addWidget(self.notice)
 
         self.transcript = QTextBrowser()
         self.transcript.setObjectName("InterviewTranscript")
-        self.transcript.setHtml("<p style='color:#817B91'>配置目标岗位后开始模拟面试。</p>")
+        self.transcript.setHtml(
+            "<br><br><br><p align='center' style='font-size:24px;color:#1D1D1F'><b>让下一场面试，更从容。</b></p>"
+            "<p align='center' style='color:#6E6E73'>选择目标公司与岗位，开始一次有针对性的练习。</p>"
+            "<br><p align='center' style='color:#6E6E73'>逐题回答　 /　 深入追问　 /　 总结与建议</p>"
+        )
         layout.addWidget(self.transcript, 1)
 
         self.answer_input = QPlainTextEdit()
@@ -163,7 +182,7 @@ class MockInterviewPage(QWidget):
         self.answer_input.clear()
         self.transcript.append(f"<p><b>我：</b>{escape(self._pending_answer)}</p>")
         self.transcript.append(
-            f"<p style='color:#6D3CF0'><b>评价：</b>{escape(result['evaluation'])}（{result['score']} 分）</p>"
+            f"<p style='color:#8061BE'><b>评价：</b>{escape(result['evaluation'])}（{result['score']} 分）</p>"
         )
         self.question_id = result["question_id"]
         if result["question"]:
@@ -214,7 +233,7 @@ class MockInterviewPage(QWidget):
             if "answer" in turn:
                 self.transcript.append(f"<p><b>我：</b>{escape(turn['answer'])}</p>")
                 evaluation = turn.get("result", {})
-                self.transcript.append(f"<p style='color:#6D3CF0'><b>评价：</b>{escape(evaluation.get('evaluation', ''))}（{evaluation.get('score', 0)} 分）</p>")
+                self.transcript.append(f"<p style='color:#8061BE'><b>评价：</b>{escape(evaluation.get('evaluation', ''))}（{evaluation.get('score', 0)} 分）</p>")
         self.question_id = result["turns"][-1]["question_id"] if result["status"] == "in_progress" else None
         self.notice.setText("已恢复上次面试。")
         if result.get("report"):

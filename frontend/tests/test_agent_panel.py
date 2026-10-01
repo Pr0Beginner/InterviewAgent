@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QCalendarWidget, QFrame, QPushButton
 
 from client.api.mock_api import MockApiClient
 from client.ui.main_window import MainWindow
-from client.ui.pages.dashboard_page import DashboardPage
+from client.ui.pages.dashboard_page import DashboardPage, SummaryCard
 from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble
 from client.ui.widgets.datetime_picker import DateTimePicker, DateTimePickerDialog
 from client.ui.widgets.dialogs import AppDialog
@@ -85,6 +85,43 @@ class AgentPanelTest(unittest.TestCase):
         self.assertEqual(api.captured["messages"][-1]["content"], "第一行\n第二行")
         self.wait_until(lambda: not panel.is_busy)
         panel.close()
+
+    def test_suggestions_preserve_draft_without_sending(self):
+        api = DelayedApi()
+        panel = AgentPanel(api)
+        panel.input.setPlainText("先了解上海的岗位")
+        panel.set_page_context("recommendations")
+        button = panel.suggestion_buttons[0]
+        button.click()
+        self.assertEqual(panel.input.toPlainText(), "先了解上海的岗位\n" + button.text())
+        self.assertIsNone(api.captured)
+        self.assertFalse(panel.is_busy)
+        panel.close()
+
+    def test_summary_can_be_filtered_from_keyboard(self):
+        page = DashboardPage(MockApiClient())
+        page.show()
+        card = next(card for card in page.findChildren(SummaryCard) if card.filter_value == "待面试")
+        card.setFocus()
+        QTest.keyClick(card, Qt.Key.Key_Return)
+        self.assertEqual(page.filter_combo.currentText(), "待面试")
+        self.assertGreater(page.table.rowCount(), 0)
+        for row in range(page.table.rowCount()):
+            self.assertEqual(page.table.cellWidget(row, page.STATUS_COLUMN).currentText(), "待面试")
+        page.close()
+
+    def test_empty_records_and_operation_feedback_remain_visible(self):
+        api = MockApiClient()
+        api._interviews.clear()
+        page = DashboardPage(api)
+        page.show()
+        self.assertEqual(page.table_stack.currentIndex(), 1)
+        self.assertTrue(page.integration_notice.isHidden())
+        page.integration_notice.setText("连接失败，请重试。")
+        self.assertFalse(page.integration_notice.isHidden())
+        page.integration_notice.setText("")
+        self.assertTrue(page.integration_notice.isHidden())
+        page.close()
 
     def test_agent_panel_width_can_be_changed_with_splitter(self):
         """主内容与 Agent 面板之间的分隔条能够改变右侧宽度。"""

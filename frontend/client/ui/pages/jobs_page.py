@@ -14,7 +14,10 @@ from PySide6.QtWidgets import (
 )
 
 from client.api.base import ApiClient
+from client.ui.icons import app_icon
 from client.ui.widgets.api_task import TaskRunner
+from client.ui.widgets.status_notice import StatusNotice
+from client.ui.widgets.glass import soft_shadow
 
 
 def _split_values(value: str) -> list[str]:
@@ -40,15 +43,18 @@ class JobsPage(QWidget):
     def _build_ui(self) -> None:
         self.setObjectName("PageSurface")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(18)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(16)
 
         title = QLabel("推荐岗位")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("查看匹配度、岗位 JD 和原始投递链接")
+        subtitle = QLabel("发现适合你的机会，了解每一份推荐的理由")
         subtitle.setObjectName("PageSubtitle")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        heading = QVBoxLayout()
+        heading.setSpacing(6)
+        heading.addWidget(title)
+        heading.addWidget(subtitle)
+        layout.addLayout(heading)
 
         filter_frame = QFrame()
         filter_frame.setObjectName("Toolbar")
@@ -56,19 +62,30 @@ class JobsPage(QWidget):
         filters.setContentsMargins(12, 9, 12, 9)
         self.city_input = QLineEdit("上海,杭州")
         self.city_input.setPlaceholderText("目标城市，用逗号分隔")
+        self.city_input.setAccessibleName("目标城市")
         self.tech_input = QLineEdit("Java,Spring Boot,MySQL")
         self.tech_input.setPlaceholderText("技术栈，用逗号分隔")
+        self.tech_input.setAccessibleName("技术栈")
         self.keyword_input = QLineEdit("Java")
         self.keyword_input.setPlaceholderText("岗位关键词")
+        self.keyword_input.setAccessibleName("岗位关键词")
         search_button = self.search_button = QPushButton("重新匹配")
         search_button.setObjectName("PrimaryButton")
+        search_button.setIcon(app_icon("search", "#FFFFFF"))
         search_button.clicked.connect(self.search_jobs)
-        filters.addWidget(self.city_input)
-        filters.addWidget(self.tech_input)
-        filters.addWidget(self.keyword_input)
+        for caption, field in (("目标城市", self.city_input), ("技术栈", self.tech_input), ("岗位关键词", self.keyword_input)):
+            group = QVBoxLayout()
+            group.setSpacing(6)
+            label = QLabel(caption)
+            label.setObjectName("MutedLabel")
+            label.setBuddy(field)
+            group.addWidget(label)
+            group.addWidget(field)
+            filters.addLayout(group, 1)
         filters.addWidget(search_button)
+        filters.setAlignment(search_button, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(filter_frame)
-        self.notice = QLabel()
+        self.notice = StatusNotice()
         self.notice.setWordWrap(True)
         self.notice.setObjectName("MutedLabel")
         layout.addWidget(self.notice)
@@ -157,12 +174,13 @@ class JobsPage(QWidget):
     def _create_card(self, job: dict) -> QFrame:
         card = QFrame()
         card.setObjectName("Card")
+        soft_shadow(card, blur=22, opacity=16, offset=6)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
 
         top = QHBoxLayout()
-        title = QLabel(f"{job['company_name']} · {job['position_name']}")
+        title = QLabel(job['position_name'])
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
         title.setObjectName("SectionTitle")
@@ -173,7 +191,7 @@ class JobsPage(QWidget):
         top.addWidget(score)
         layout.addLayout(top)
 
-        meta = QLabel(f"Base：{job['base_location']}    {job['jd_summary']}")
+        meta = QLabel(f"{job['company_name']}    /    {job['base_location']}\n{job['jd_summary']}")
         meta.setObjectName("MutedLabel")
         meta.setWordWrap(True)
         layout.addWidget(meta)

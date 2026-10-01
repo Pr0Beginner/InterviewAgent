@@ -4,7 +4,6 @@ from PySide6.QtCore import QDateTime, QTime, Qt, Signal
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QCalendarWidget,
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -13,9 +12,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from client.ui.widgets.glass_combo import GlassComboBox
 
 
-class NoWheelComboBox(QComboBox):
+class NoWheelComboBox(GlassComboBox):
     """仅通过点击和键盘选择，不响应滚轮改值。"""
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -90,7 +90,7 @@ class DateTimePickerDialog(QDialog):
         self.minute_combo.setCurrentIndex(initial.time().minute())
         for combo in (self.hour_combo, self.minute_combo):
             combo.setMaxVisibleItems(8)
-            combo.view().setMaximumHeight(260)
+            combo.view().setMaximumHeight(344)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         time_row.addWidget(time_label)
         time_row.addStretch()

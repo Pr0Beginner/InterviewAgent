@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent
+from PySide6.QtCore import QDateTime, QEvent, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -19,9 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 from client.api.base import ApiClient
+from client.ui.icons import app_icon
 from client.ui.widgets.api_task import TaskRunner
 from client.ui.widgets.datetime_picker import DateTimePicker
 from client.ui.widgets.dialogs import AppDialog
+from client.ui.widgets.status_notice import StatusNotice
+from client.ui.widgets.glass import soft_shadow
+from client.ui.widgets.glass_combo import GlassComboBox
 
 
 class SummaryCard(QFrame):
@@ -33,9 +38,18 @@ class SummaryCard(QFrame):
         self.setObjectName("SummaryCard")
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(f"筛选{filter_value}投递")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.clicked.emit(self.filter_value)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
             self.clicked.emit(self.filter_value)
         super().mouseReleaseEvent(event)
 
@@ -88,23 +102,26 @@ class DashboardPage(QWidget):
     def _build_ui(self) -> None:
         self.setObjectName("PageSurface")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(18)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(16)
 
         header = QHBoxLayout()
         heading_box = QVBoxLayout()
-        title = QLabel("当前投递进度")
+        heading_box.setSpacing(6)
+        title = QLabel("投递进度")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("表格内容可直接编辑，修改后的行会显示 * 标记")
+        subtitle = QLabel("每一份投递，每一步进展")
         subtitle.setObjectName("PageSubtitle")
         heading_box.addWidget(title)
         heading_box.addWidget(subtitle)
 
         email_button = self.email_button = QPushButton("扫描未读邮件")
         email_button.setObjectName("SecondaryButton")
+        email_button.setIcon(app_icon("mail"))
         email_button.clicked.connect(self._sync_email)
         feishu_button = self.feishu_button = QPushButton("同步飞书")
         feishu_button.setObjectName("PrimaryButton")
+        feishu_button.setIcon(app_icon("sync", "#FFFFFF"))
         feishu_button.clicked.connect(self._sync_feishu)
 
         header.addLayout(heading_box)
@@ -112,23 +129,38 @@ class DashboardPage(QWidget):
         header.addWidget(email_button)
         header.addWidget(feishu_button)
         layout.addLayout(header)
-        self.integration_notice = QLabel()
+        self.integration_notice = StatusNotice()
         self.integration_notice.setWordWrap(True)
         self.integration_notice.setObjectName("MutedLabel")
         layout.addWidget(self.integration_notice)
+        layout.setSpacing(16)
 
-        self.cards = QHBoxLayout()
-        layout.addLayout(self.cards)
+        summary_group = QFrame()
+        summary_group.setObjectName("SummaryGroup")
+        self.cards = QHBoxLayout(summary_group)
+        self.cards.setContentsMargins(0, 0, 0, 0)
+        self.cards.setSpacing(14)
+        layout.addWidget(summary_group)
+
+        table_surface = QFrame()
+        table_surface.setObjectName("TableSurface")
+        soft_shadow(table_surface, blur=22, opacity=10, offset=6)
+        table_layout = QVBoxLayout(table_surface)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
 
         toolbar = QFrame()
-        toolbar.setObjectName("Toolbar")
+        toolbar.setObjectName("TableToolbar")
         controls = QHBoxLayout(toolbar)
-        controls.setContentsMargins(12, 9, 12, 9)
-        self.filter_combo = QComboBox()
+        controls.setContentsMargins(14, 12, 14, 12)
+        table_title = QLabel("投递记录")
+        table_title.setObjectName("SectionTitle")
+        controls.addWidget(table_title)
+        controls.addSpacing(14)
+        self.filter_combo = GlassComboBox()
         self.filter_combo.setObjectName("StatusFilter")
         self.filter_combo.addItems(["全部", *self.STATUS_OPTIONS])
         _configure_status_combo(self.filter_combo)
-        _color_status_items(self.filter_combo)
         _apply_status_tone(self.filter_combo, "全部")
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
         self.save_button = QPushButton("保存修改")
@@ -139,23 +171,20 @@ class DashboardPage(QWidget):
         self.discard_button.setObjectName("DangerButton")
         self.discard_button.setEnabled(False)
         self.discard_button.clicked.connect(self._confirm_discard_changes)
-        controls.addWidget(QLabel("筛选状态"))
+        controls.addWidget(QLabel("状态"))
         controls.addWidget(self.filter_combo)
         controls.addStretch()
-        pending_hint = QLabel("* 表示该行尚未保存")
-        pending_hint.setObjectName("MutedLabel")
         self.save_feedback = QLabel("")
         self.save_feedback.setObjectName("SaveFeedback")
         self.save_feedback.hide()
         controls.addWidget(self.save_feedback)
-        controls.addWidget(pending_hint)
         controls.addWidget(self.discard_button)
         controls.addWidget(self.save_button)
-        layout.addWidget(toolbar)
+        table_layout.addWidget(toolbar)
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["", "公司", "岗位", "Base", "当前状态", "开始时间", "结束时间"]
+            ["", "公司", "岗位", "城市", "当前状态", "开始时间", "结束时间"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -170,24 +199,40 @@ class DashboardPage(QWidget):
         self.table.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.verticalHeader().setDefaultSectionSize(52)
         self.table.itemChanged.connect(self._on_item_changed)
         header_view = self.table.horizontalHeader()
         header_view.setSectionsMovable(False)
+        header_view.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header_view.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        header_view.setMinimumSectionSize(20)
+        header_view.setStretchLastSection(False)
         for column, width in {
             self.MARKER_COLUMN: 20,
-            self.COMPANY_COLUMN: 135,
-            self.POSITION_COLUMN: 220,
-            self.BASE_COLUMN: 100,
+            self.COMPANY_COLUMN: 140,
+            self.POSITION_COLUMN: 280,
+            self.BASE_COLUMN: 80,
             self.STATUS_COLUMN: 150,
-            self.START_TIME_COLUMN: 190,
-            self.END_TIME_COLUMN: 190,
+            self.START_TIME_COLUMN: 180,
+            self.END_TIME_COLUMN: 180,
         }.items():
             header_view.resizeSection(column, width)
-        layout.addWidget(self.table, 1)
+        self.table.viewport().installEventFilter(self)
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.table)
+        empty = QLabel("暂无投递记录\n\n可以切换状态筛选，或同步飞书导入投递。")
+        empty.setObjectName("MutedLabel")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setWordWrap(True)
+        self.table_stack.addWidget(empty)
+        table_layout.addWidget(self.table_stack, 1)
 
         pagination = QHBoxLayout()
+        pagination.setSpacing(10)
+        pagination.setContentsMargins(14, 12, 14, 12)
+        self.record_count = QLabel()
+        self.record_count.setObjectName("MutedLabel")
+        pagination.addWidget(self.record_count)
         pagination.addStretch()
         self.previous_button = QPushButton("上一页")
         self.previous_button.setObjectName("SecondaryButton")
@@ -201,8 +246,21 @@ class DashboardPage(QWidget):
         pagination.addWidget(self.previous_button)
         pagination.addWidget(self.page_label)
         pagination.addWidget(self.next_button)
-        pagination.addStretch()
-        layout.addLayout(pagination)
+        table_layout.addLayout(pagination)
+        layout.addWidget(table_surface, 1)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.table.viewport() and event.type() == QEvent.Type.Resize:
+            # Give spare width to job titles; keep both date columns identical.
+            fixed_width = sum(
+                self.table.columnWidth(column)
+                for column in range(self.table.columnCount())
+                if column != self.POSITION_COLUMN
+            )
+            self.table.setColumnWidth(
+                self.POSITION_COLUMN, max(280, self.table.viewport().width() - fixed_width)
+            )
+        return super().eventFilter(watched, event)
 
     def refresh(self) -> None:
         response = self.api.list_interviews(
@@ -228,6 +286,7 @@ class DashboardPage(QWidget):
         self._loading = True
         self.table.clearContents()
         self.table.setRowCount(len(records))
+        self.table_stack.setCurrentIndex(0 if records else 1)
         self._original_records = {record["id"]: _normalize_record(record) for record in records}
         self._dirty_ids.clear()
 
@@ -248,13 +307,17 @@ class DashboardPage(QWidget):
                 text = str(value)
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
+                if column == self.COMPANY_COLUMN:
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setForeground(QColor("#1D1D1F"))
                 self.table.setItem(row, column, item)
 
-            status_combo = QComboBox()
+            status_combo = GlassComboBox()
             status_combo.setObjectName("TableEditor")
             status_combo.addItems(self.STATUS_OPTIONS)
             _configure_status_combo(status_combo)
-            _color_status_items(status_combo)
             if record["current_status"] not in self.STATUS_OPTIONS:
                 status_combo.addItem(record["current_status"])
             status_combo.setCurrentText(record["current_status"])
@@ -433,8 +496,9 @@ class DashboardPage(QWidget):
 
     def _update_pagination(self, response: dict) -> None:
         self.page_label.setText(
-            f"第 {response['page']} / {response['total_pages']} 页 · 共 {response['total']} 条"
+            f"{response['page']} / {response['total_pages']}"
         )
+        self.record_count.setText(f"共 {response['total']} 条投递")
         self.previous_button.setEnabled(response["has_previous"])
         self.next_button.setEnabled(response["has_next"])
 
@@ -444,7 +508,7 @@ class DashboardPage(QWidget):
             return
         self._loading = True
         marker.setText("*" if dirty else "")
-        marker.setForeground(QColor("#8652E8"))
+        marker.setForeground(QColor("#9273D5"))
         font = marker.font()
         font.setBold(dirty)
         font.setPointSize(15)
@@ -477,24 +541,32 @@ class DashboardPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         status_counts = summary["status_counts"]
-        for label, filter_value in self.SUMMARY_CARDS:
+        for (label, filter_value), icon_name in zip(self.SUMMARY_CARDS, ("case", "grid", "calendar", "check")):
             count = summary["total"] if filter_value == "全部" else status_counts[filter_value]
             card = SummaryCard(filter_value)
+            soft_shadow(card, blur=18, opacity=16, offset=6)
             card.setProperty("active", filter_value == self._active_filter)
             card.setProperty("statusTone", _status_tone(filter_value))
             card.clicked.connect(self._select_card_filter)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(15, 13, 15, 13)
-            card_layout.setSpacing(4)
+            card_layout.setContentsMargins(18, 14, 18, 14)
+            card_layout.setSpacing(10)
             name = QLabel(label)
             name.setObjectName("CardLabel")
             name.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            value = QLabel(f"{count:02d}")
+            card_header = QHBoxLayout()
+            card_header.addWidget(name)
+            card_header.addStretch()
+            glyph = QLabel()
+            glyph.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            glyph.setPixmap(app_icon(icon_name, "#739680" if filter_value == "Offer" else "#9A88B5").pixmap(QSize(20, 20)))
+            card_header.addWidget(glyph)
+            value = QLabel(str(count))
             value.setObjectName("CardValue")
             value.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            card_layout.addWidget(name)
+            card_layout.addLayout(card_header)
             card_layout.addWidget(value)
-            self.cards.addWidget(card)
+            self.cards.addWidget(card, 1)
 
     def _sync_email(self) -> None:
         if self.runner.busy or self._email_task_id:
@@ -616,26 +688,10 @@ def _apply_status_tone(widget: QWidget, status: str) -> None:
     widget.update()
 
 
-def _color_status_items(combo: QComboBox) -> None:
-    for index in range(combo.count()):
-        status = combo.itemText(index)
-        if status == "已投递":
-            combo.setItemData(index, QColor("#41699B"), Qt.ItemDataRole.ForegroundRole)
-            combo.setItemData(index, QColor("#EAF2FB"), Qt.ItemDataRole.BackgroundRole)
-        elif status == "Offer":
-            combo.setItemData(index, QColor("#238B63"), Qt.ItemDataRole.ForegroundRole)
-            combo.setItemData(index, QColor("#E6F8EF"), Qt.ItemDataRole.BackgroundRole)
-        elif status == "待面试":
-            combo.setItemData(index, QColor("#9A6500"), Qt.ItemDataRole.ForegroundRole)
-            combo.setItemData(index, QColor("#FFF5D9"), Qt.ItemDataRole.BackgroundRole)
-        elif status == "已结束":
-            combo.setItemData(index, QColor("#777382"), Qt.ItemDataRole.ForegroundRole)
-            combo.setItemData(index, QColor("#F0EEF3"), Qt.ItemDataRole.BackgroundRole)
-
-
 def _configure_status_combo(combo: QComboBox) -> None:
     """限制状态弹层高度，并允许通过滚轮或滚动条浏览全部状态。"""
     combo.setMaxVisibleItems(6)
-    combo.view().setMaximumHeight(240)
+    combo.setProperty("statusSelector", True)
+    combo.view().setMaximumHeight(256)
     combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     combo.view().setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
