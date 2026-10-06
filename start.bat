@@ -11,7 +11,7 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-app.ps1"
+"%~dp0.venv\Scripts\python.exe" "%~dp0scripts\start_app.py"
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 if not "%APP_EXIT_CODE%"=="0" (

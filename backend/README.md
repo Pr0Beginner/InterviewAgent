@@ -11,8 +11,8 @@ if (-not (Test-Path backend\.env)) { Copy-Item backend\.env.example backend\.env
 
 ## 启动
 
-```powershell
-.\start.bat
+```bat
+start.bat
 ```
 
 该脚本从项目根目录统一启动后端和 PySide6 客户端。

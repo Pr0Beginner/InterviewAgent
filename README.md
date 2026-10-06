@@ -178,8 +178,8 @@ NETEASE_EMAIL_AUTH_CODE=
 
 双击根目录的 `start.bat`，或执行以下命令。脚本会先自动执行数据库迁移，再启动后端和客户端：
 
-```powershell
-.\start.bat
+```bat
+start.bat
 ```
 
 启动脚本会：
