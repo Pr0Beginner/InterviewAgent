@@ -57,11 +57,12 @@ if (-not (Test-BackendHealth)) {
     }
 
     # Windows 虚拟环境启动器可能派生实际监听进程，记录真正占用端口的 PID。
-    $listener = Get-NetTCPConnection `
-        -LocalPort 8000 `
-        -State Listen `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    $connectionQuery = @{
+        LocalPort = 8000
+        State = "Listen"
+        ErrorAction = "SilentlyContinue"
+    }
+    $listener = Get-NetTCPConnection @connectionQuery | Select-Object -First 1
     if ($null -ne $listener) {
         $backendListenerPid = $listener.OwningProcess
     }
