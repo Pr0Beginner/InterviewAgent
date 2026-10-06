@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -26,12 +26,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     log_level: str = "INFO"
 
-    mysql_url: str = (
-        "mysql+pymysql://interview:interview@127.0.0.1:3306/"
-        "interview_assistant?charset=utf8mb4"
-    )
-    mysql_echo: bool = False
     langgraph_sqlite_path: Path = BACKEND_DIR / "data" / "langgraph.sqlite3"
+    interviews_file_path: Path = BACKEND_DIR / "data" / "interviews.md"
+    local_state_path: Path = BACKEND_DIR / "data" / "runtime.json"
 
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -43,13 +40,6 @@ class Settings(BaseSettings):
     netease_imap_port: int = 993
     netease_email: str | None = None
     netease_email_auth_code: SecretStr | None = None
-    feishu_document_token: str | None = None
-    feishu_interview_date_token: str | None = Field(default=None, validation_alias=AliasChoices("FEISHU_InterviewDate_TOKEN", "feishu_interview_date_token"))
-    feishu_progress_token: str | None = None
-    feishu_interview_question_token: str | None = Field(default=None, validation_alias=AliasChoices("FEISHU_InterviewQuestion_TOKEN", "feishu_interview_question_token"))
-    feishu_cli_path: str = "lark-cli"
-    feishu_node_path: str = "node"
-    feishu_cli_profile: str | None = None
     boss_profile_path: Path = BACKEND_DIR / "data" / "boss-profile"
     boss_browser_channel: str = "msedge"
     jobs_max_candidates: int = Field(default=10, ge=1, le=30)
@@ -57,9 +47,9 @@ class Settings(BaseSettings):
 
     request_timeout_seconds: float = Field(default=30.0, gt=0)
 
-    @field_validator("langgraph_sqlite_path", "boss_profile_path", mode="before")
+    @field_validator("langgraph_sqlite_path", "interviews_file_path", "local_state_path", "boss_profile_path", mode="before")
     @classmethod
-    def resolve_langgraph_sqlite_path(cls, value: str | Path) -> Path:
+    def resolve_local_path(cls, value: str | Path) -> Path:
         """以 backend 目录为基准解析状态文件或浏览器配置目录的相对路径。
         
         参数:

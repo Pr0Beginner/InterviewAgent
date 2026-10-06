@@ -1,20 +1,16 @@
 """使用 Skill 对真实 JD 进行匹配排序，并缓存结果以保持分页稳定。"""
 
-from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
-
 from backend.app.agent.provider import DeepSeekProvider
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ApplicationError
-from backend.app.db.mysql import get_session_factory
 from backend.app.integrations.boss import BossJobSource
-from backend.app.models import TaskRun
 from backend.app.schemas.business import JobAssessment
+from backend.app.storage.local import LocalStateStore
 
 SKILL = (Path(__file__).resolve().parents[1] / "agent/skills/job_recommendation.md").read_text(encoding="utf-8")
 
@@ -22,9 +18,9 @@ SKILL = (Path(__file__).resolve().parents[1] / "agent/skills/job_recommendation.
 class JobService:
     """获取来源页面，仅评估具有真实链接和 JD 文本的岗位。"""
 
-    def __init__(self, factory=None, provider=None, source=None):
-        """注入 MySQL 会话工厂、匹配评估模型和 BOSS 浏览器数据源。"""
-        self.factory = factory or get_session_factory()
+    def __init__(self, state_store=None, provider=None, source=None):
+        """注入本地状态文件、匹配评估模型和 BOSS 浏览器数据源。"""
+        self.state_store = state_store or LocalStateStore()
         self.provider = provider or DeepSeekProvider(get_settings())
         self.source = source or BossJobSource()
 
@@ -32,9 +28,8 @@ class JobService:
         """创建或复用搜索快照，后续翻页不重复调用模型。"""
         criteria = request.model_dump(exclude={"page", "page_size", "extensions"})
         cache_id = "jobs-" + sha256(json.dumps(criteria, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:50]
-        with self.factory() as session:
-            cached = session.get(TaskRun, cache_id)
-            items = cached.result.get("items") if cached and cached.status == "completed" else None
+        cached = self.state_store.get("job_searches", cache_id)
+        items = cached.get("result", {}).get("items") if cached and cached.get("status") == "completed" else None
         if request.extensions.get("cached_only") and items is None:
             return self._page([], request, cache_id, "尚无匹配结果，点击重新匹配开始搜索。")
         if items is None or (request.extensions.get("refresh") and not request.extensions.get("cached_only")):
@@ -50,24 +45,21 @@ class JobService:
                 item.update(id="job-" + uuid4().hex, job_url=source["job_url"], job_description=source["job_description"])
                 items.append(item)
             items.sort(key=lambda item: item["match_score"], reverse=True)
-            with self.factory() as session:
-                row = session.get(TaskRun, cache_id)
-                if row is None:
-                    row = TaskRun(id=cache_id, kind="jobs", status="completed", result={})
-                    session.add(row)
-                row.status = "completed"
-                row.result = {"criteria": criteria, "items": items}
-                row.updated_at = datetime.now()
-                session.commit()
+            self.state_store.put("job_searches", cache_id, {
+                "id": cache_id,
+                "status": "completed",
+                "result": {"criteria": criteria, "items": items},
+            })
         return self._page(items, request, cache_id)
 
     def get(self, recommendation_id: str) -> dict:
         """在已持久化的搜索快照中查找推荐记录。"""
-        with self.factory() as session:
-            for row in session.scalars(select(TaskRun).where(TaskRun.kind == "jobs", TaskRun.status == "completed")):
-                for job in row.result.get("items", []):
-                    if job["id"] == recommendation_id:
-                        return job
+        for row in self.state_store.values("job_searches"):
+            if row.get("status") != "completed":
+                continue
+            for job in row.get("result", {}).get("items", []):
+                if job["id"] == recommendation_id:
+                    return job
         raise ApplicationError("JOB_NOT_FOUND", "岗位推荐不存在或已刷新。", status_code=404)
 
     @staticmethod

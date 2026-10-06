@@ -6,15 +6,11 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from backend.app.agent.workflows import InterviewWorkflows
-from backend.app.core.exceptions import ApplicationError
-from backend.app.db.mysql import get_session_factory
-from backend.app.models import TaskRun
 from backend.app.schemas.business import CreateInterview, EmailSyncRequest, JobSearchRequest, MockInterviewRequest, MockAnswerRequest
 from backend.app.schemas.common import ExtensibleRequest
-from backend.app.services.email_sync import EmailSyncService, task_result
+from backend.app.services.email_sync import EmailSyncService
 from backend.app.services.jobs import JobService
 from backend.app.services.mock_interviews import MockInterviewService
-from backend.app.services.sync import sync_feishu
 
 router = APIRouter(tags=["Business"])
 
@@ -35,12 +31,6 @@ def create_interview(request: CreateInterview):
     return InterviewWorkflows().mutate(request.model_dump(mode="json", exclude_unset=True), uuid4().hex, create=True)
 
 
-@router.post("/feishu/sync")
-def synchronize_feishu(request: ExtensibleRequest):
-    """合并原飞书进度及日期；扩展参数 direction 可限定为仅导入或仅推送。"""
-    return sync_feishu(direction=request.extensions.get("direction", "both"))
-
-
 @router.post("/email/sync", status_code=202)
 def synchronize_email(request: EmailSyncRequest, background_tasks: BackgroundTasks):
     """接收邮件扫描请求；范围可选未读、已读或全部。"""
@@ -52,14 +42,8 @@ def synchronize_email(request: EmailSyncRequest, background_tasks: BackgroundTas
 
 @router.get("/tasks/{task_id}")
 def get_task(task_id: str):
-    """返回持久化的任务状态、统计数量、待核对项和可安全展示的错误说明。"""
-    with get_session_factory()() as session:
-        row = session.get(TaskRun, task_id)
-        if row is None or row.kind != "email":
-            raise ApplicationError("TASK_NOT_FOUND", "任务不存在。", status_code=404)
-        result = task_result(row)
-        session.commit()
-        return result
+    """返回本地任务状态、统计数量和可安全展示的错误说明。"""
+    return EmailSyncService().get_task(task_id)
 
 
 @router.post("/job-recommendations")

@@ -4,9 +4,6 @@ from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy.orm import Session
-
-from backend.app.db.mysql import get_db_session
 from backend.app.models.enums import InterviewStatus
 from backend.app.schemas.interviews import (
     InterviewListResponse,
@@ -22,18 +19,9 @@ from backend.app.services.interviews import InterviewService
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
 
 
-def get_interview_service(
-    session: Annotated[Session, Depends(get_db_session)],
-) -> InterviewService:
-    """使用请求级数据库会话创建面试业务服务。
-    
-    参数:
-        session: FastAPI 通过依赖注入提供的 SQLAlchemy 会话。
-    
-    返回值:
-        当前请求使用的业务服务实例。
-    """
-    return InterviewService(session)
+def get_interview_service() -> InterviewService:
+    """创建读取本地 Markdown 的投递业务服务。"""
+    return InterviewService()
 
 
 @router.get("", response_model=InterviewListResponse)
@@ -103,7 +91,7 @@ def update_interview(
         interview_id: URL 中的投递记录 ID。
     
     返回值:
-        已保存的记录及其飞书同步状态。
+        已保存的本地记录。
     """
     application = service.update_interview(interview_id, request)
     return InterviewUpdateResponse.model_validate(application)
@@ -123,7 +111,7 @@ def update_interview_status(
         interview_id: URL 中的投递记录 ID。
     
     返回值:
-        变更前状态、当前状态和同步状态。
+        变更前状态和当前状态。
     """
     application, previous_status = service.update_status(interview_id, request)
     return InterviewStatusUpdateResponse(

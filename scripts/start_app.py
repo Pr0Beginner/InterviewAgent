@@ -1,4 +1,4 @@
-"""在 Windows 上统一启动数据库迁移、后端服务和桌面客户端。"""
+"""在 Windows 上统一启动后端服务和桌面客户端。"""
 
 from __future__ import annotations
 
@@ -24,17 +24,6 @@ def 后端健康() -> bool:
             return response.status == 200 and 内容.get("status") == "ok"
     except (OSError, ValueError, urllib.error.URLError):
         return False
-
-
-def 执行数据库迁移() -> None:
-    """将本地 MySQL 表结构升级到当前代码要求的版本。"""
-    结果 = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head"],
-        cwd=项目目录,
-        check=False,
-    )
-    if 结果.returncode != 0:
-        raise RuntimeError("数据库迁移失败。")
 
 
 def 启动后端() -> subprocess.Popen[bytes]:
@@ -77,10 +66,9 @@ def 结束进程(进程: subprocess.Popen[bytes] | None) -> None:
 
 
 def main() -> int:
-    """依次执行迁移、启动后端并打开 PySide6 客户端。"""
+    """启动后端并打开 PySide6 客户端。"""
     后端进程: subprocess.Popen[bytes] | None = None
     try:
-        执行数据库迁移()
         if 后端健康():
             print("[INFO] 检测到后端已经运行，将直接复用。")
         else:

@@ -3,9 +3,7 @@
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy.exc import SQLAlchemyError
 
-from backend.app.db.mysql import get_session_factory
 from backend.app.models.enums import InterviewStatus
 from backend.app.schemas.interviews import InterviewRecord
 from backend.app.services.interviews import InterviewService
@@ -15,6 +13,7 @@ from uuid import uuid4
 import asyncio
 from backend.app.schemas.business import JobSearchRequest, MockInterviewRequest, MockAnswerRequest, EmailSyncRequest
 from backend.app.schemas.common import ExtensibleRequest
+from backend.app.storage.local import MarkdownInterviewStore
 
 
 class InterviewQuery(BaseModel):
@@ -62,37 +61,33 @@ BUSINESS_TOOL_MODELS = {
     "finish_mock_interview": (SessionFinish, "结束模拟面试并生成基于实际回答的总结"),
     "scan_emails": (EmailSyncRequest, "扫描网易邮箱并等待完成。scope 可选 unread、read、all；直接返回扫描统计和待核对邮件"),
     "get_task_status": (TaskQuery, "查询邮件扫描任务的进度、结果和需人工核对项"),
-    "update_feishu_summary": (ExtensibleRequest, "用户要求时合并飞书进度、日期及 MySQL 投递；extensions.direction 为 both/pull/push，未注明轮次不猜测"),
-    "read_interview_experience": (ExtensibleRequest, "读取当前配置中的个人面经，只返回 ZMY 部分，不读取其他人的面经"),
 }
 BUSINESS_TOOLS = [{"type": "function", "function": {"name": name, "description": description, "parameters": model.model_json_schema()}}
                   for name, (model, description) in BUSINESS_TOOL_MODELS.items()]
 
 
-def run_interview_query(query: InterviewQuery, session_factory=None) -> dict[str, Any]:
-    """使用短生命周期的数据库会话查询一页记录。
+def run_interview_query(query: InterviewQuery, store: MarkdownInterviewStore | None = None) -> dict[str, Any]:
+    """查询本地 Markdown 中的一页投递记录。
     
     参数:
         query: 已校验的筛选条件和分页范围。
-        session_factory: 可选的 SQLAlchemy 会话工厂，供集成测试使用。
+        store: 可选的本地投递存储，供测试隔离文件使用。
     
     返回值:
-        可序列化为 JSON 的 MySQL 记录及数量；飞书数据由业务图另行合并。
+        可序列化为 JSON 的本地记录、分页和状态数量。
     """
-    factory = session_factory or get_session_factory()
-    with factory() as session:
-        result = InterviewService(session).list_interviews(
-            company_name=query.company_name, position_name=query.position_name,
-            status=query.status.value if query.status else None,
-            page=query.page, page_size=query.page_size,
-        )
-        return {
-            "items": [InterviewRecord.model_validate(row).model_dump(mode="json") for row in result.items],
-            "total": result.total, "page": query.page, "page_size": query.page_size,
-            "has_next": query.page * query.page_size < result.total,
-            "summary": {"total": result.summary_total, "status_counts": result.status_counts},
-            "source": "mysql", "feishu_sync_status": "not_connected",
-        }
+    result = InterviewService(store).list_interviews(
+        company_name=query.company_name, position_name=query.position_name,
+        status=query.status.value if query.status else None,
+        page=query.page, page_size=query.page_size,
+    )
+    return {
+        "items": [InterviewRecord.model_validate(row).model_dump(mode="json") for row in result.items],
+        "total": result.total, "page": query.page, "page_size": query.page_size,
+        "has_next": query.page * query.page_size < result.total,
+        "summary": {"total": result.summary_total, "status_counts": result.status_counts},
+        "source": "local_markdown",
+    }
 
 
 def execute_tool(name: str, arguments: str) -> dict[str, Any]:
@@ -120,17 +115,13 @@ def execute_tool(name: str, arguments: str) -> dict[str, Any]:
         return {"error": "工具参数不合法，请按照参数约束修正。"}
     except ApplicationError as exc:
         return {"error": exc.message, "code": exc.code}
-    except SQLAlchemyError:
-        return {"error": "数据库查询失败，无法确定当前状态。请检查数据库连接。"}
 
 
 def execute_business_tool(name, request):
     """在工作线程中调用与图形界面接口相同的业务服务。"""
     from backend.app.services.mock_interviews import MockInterviewService
     from backend.app.services.jobs import JobService
-    from backend.app.services.sync import sync_feishu
-    from backend.app.services.email_sync import EmailSyncService, task_result
-    from backend.app.models import TaskRun
+    from backend.app.services.email_sync import EmailSyncService
     if name == "recommend_jobs":
         return asyncio.run(JobService().recommend(request))
     if name == "start_mock_interview":
@@ -143,18 +134,10 @@ def execute_business_tool(name, request):
         service = EmailSyncService()
         task = service.create_task(request.limit, request.scope)
         service.run(task["task_id"], request.limit, request.scope)
-        with get_session_factory()() as session:
-            row = session.get(TaskRun, task["task_id"])
-            return task_result(row)
+        return service.get_task(task["task_id"])
     if name == "get_task_status":
-        with get_session_factory()() as session:
-            row = session.get(TaskRun, request.task_id)
-            if row is None or row.kind != "email":
-                return {"error": "任务不存在。"}
-            result = task_result(row)
-            session.commit()
-            return result
-    if name == "read_interview_experience":
-        from backend.app.integrations.feishu import FeishuClient
-        return FeishuClient().read_experience()
-    return sync_feishu(direction=request.extensions.get("direction", "both"))
+        try:
+            return EmailSyncService().get_task(request.task_id)
+        except ApplicationError as exc:
+            return {"error": exc.message, "code": exc.code}
+    return {"error": "工具未接通，未执行任何操作。"}

@@ -141,20 +141,6 @@ class ApiClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def sync_feishu(
-        self, extensions: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """将投递数据同步到飞书。
-        
-        参数:
-            extensions: 用于后续兼容的可选请求扩展参数。
-        
-        返回值:
-            同步结果的统计数量。
-        """
-        raise NotImplementedError
-
-    @abstractmethod
     def recommend_jobs(
         self,
         cities: list[str],

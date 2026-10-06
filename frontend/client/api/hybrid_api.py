@@ -52,7 +52,6 @@ class HybridApiClient(ApiClient):
         params = dict(params)
         paths = {
             "sync_email": ("POST", "/email/sync"),
-            "sync_feishu": ("POST", "/feishu/sync"),
             "recommend_jobs": ("POST", "/job-recommendations"),
             "create_mock_interview": ("POST", "/mock-interviews"),
         }
@@ -98,10 +97,6 @@ class HybridApiClient(ApiClient):
         return self._business_call("sync_email", {
             "limit": limit, "scope": scope, "extensions": extensions,
         })
-
-    def sync_feishu(self, extensions=None):
-        """同步原进度表及日期；extensions.direction 可选择 both、pull 或 push。"""
-        return self._business_call("sync_feishu", {"extensions": extensions})
 
     def recommend_jobs(self, cities, tech_stack, business_preferences=None, keywords=None, page=1, page_size=10, extensions=None):
         """按指定求职条件和筛选参数获取一页岗位推荐。"""

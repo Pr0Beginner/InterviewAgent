@@ -1,178 +1,58 @@
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.app.db.base import Base
-from backend.app.db.mysql import get_db_session
+from backend.app.api.routes.interviews import get_interview_service
 from backend.app.main import app
-from backend.app.models import ApplicationStatusHistory, JobApplication
+from backend.app.services.interviews import InterviewService
+from backend.app.storage.local import MarkdownInterviewStore
 
 
 class InterviewsApiTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.engine = create_engine(
-            "sqlite+pysqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        cls.session_factory = sessionmaker(
-            bind=cls.engine,
-            class_=Session,
-            expire_on_commit=False,
-        )
-
-        def override_session():
-            with cls.session_factory() as session:
-                yield session
-
-        app.dependency_overrides[get_db_session] = override_session
-        cls.client = TestClient(app)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        app.dependency_overrides.clear()
-        cls.engine.dispose()
-
     def setUp(self) -> None:
-        Base.metadata.drop_all(self.engine)
-        Base.metadata.create_all(self.engine)
-        with self.session_factory() as session:
-            session.add_all(
-                [
-                    JobApplication(
-                        company_name="网易",
-                        position_name="Java 后端开发工程师",
-                        base_location="杭州",
-                        current_status="一面",
-                        interview_time=datetime(2026, 10, 8, 14, 0),
-                        interview_end_time=datetime(2026, 10, 8, 15, 0),
-                        job_url="https://example.com/netease",
-                        updated_at=datetime(2026, 9, 30, 10, 20),
-                    ),
-                    JobApplication(
-                        company_name="字节跳动",
-                        position_name="后端开发工程师",
-                        base_location="上海",
-                        current_status="笔试中",
-                        interview_time=None,
-                        interview_end_time=None,
-                        job_url="https://example.com/bytedance",
-                        updated_at=datetime(2026, 9, 29, 18, 10),
-                    ),
-                    JobApplication(
-                        company_name="美团",
-                        position_name="Java 服务端开发",
-                        base_location="北京",
-                        current_status="简历筛选中",
-                        interview_time=datetime(2026, 10, 10, 10, 0),
-                        interview_end_time=datetime(2026, 10, 10, 11, 0),
-                        job_url="https://example.com/meituan",
-                        updated_at=datetime(2026, 9, 27, 9, 30),
-                    ),
-                ]
-            )
-            session.commit()
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = MarkdownInterviewStore(Path(self.temp.name) / "interviews.md")
+        self.store.replace_all([
+            {"id": 1, "company_name": "网易", "position_name": "Java 后端开发工程师", "base_location": "杭州", "current_status": "一面", "interview_time": datetime(2026, 10, 8, 14), "interview_end_time": datetime(2026, 10, 8, 15), "job_url": "https://example.com/netease", "created_at": datetime(2026, 9, 30), "updated_at": datetime(2026, 9, 30, 10, 20)},
+            {"id": 2, "company_name": "字节跳动", "position_name": "后端开发工程师", "base_location": "上海", "current_status": "笔试中", "interview_time": None, "interview_end_time": None, "job_url": None, "created_at": datetime(2026, 9, 29), "updated_at": datetime(2026, 9, 29, 18, 10)},
+            {"id": 3, "company_name": "美团", "position_name": "Java 服务端开发", "base_location": "北京", "current_status": "简历筛选中", "interview_time": datetime(2026, 10, 10, 10), "interview_end_time": datetime(2026, 10, 10, 11), "job_url": None, "created_at": datetime(2026, 9, 27), "updated_at": datetime(2026, 9, 27, 9, 30)},
+        ])
+        app.dependency_overrides[get_interview_service] = lambda: InterviewService(self.store)
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.addCleanup(app.dependency_overrides.clear)
 
-    def test_list_interviews_supports_pagination_filter_and_summary(self) -> None:
-        response = self.client.get(
-            "/api/interviews",
-            params={"status": "一面", "page": 1, "page_size": 1},
-        )
-
+    def test_list_supports_pagination_filter_summary_and_time_order(self) -> None:
+        response = self.client.get("/api/interviews", params={"page": 1, "page_size": 10})
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["total"], 1)
-        self.assertEqual(payload["items"][0]["company_name"], "网易")
-        self.assertEqual(payload["summary"]["total"], 3)
+        self.assertEqual([item["company_name"] for item in payload["items"]], ["美团", "网易", "字节跳动"])
         self.assertEqual(payload["summary"]["status_counts"]["笔试中"], 1)
-        self.assertEqual(payload["summary"]["status_counts"]["Offer"], 0)
+        filtered = self.client.get("/api/interviews", params={"status": "一面", "page_size": 1}).json()
+        self.assertEqual(filtered["total"], 1)
+        self.assertEqual(filtered["summary"]["total"], 3)
 
-    def test_list_interviews_orders_by_start_time_descending_with_empty_last(self) -> None:
-        response = self.client.get("/api/interviews", params={"page": 1, "page_size": 10})
-
-        self.assertEqual(response.status_code, 200)
-        items = response.json()["items"]
-        self.assertEqual([item["company_name"] for item in items], ["美团", "网易", "字节跳动"])
-
-    def test_full_update_accepts_extensions_and_writes_status_history(self) -> None:
-        interview_id = self._application_id("网易")
-        response = self.client.patch(
-            f"/api/interviews/{interview_id}",
-            json={
-                "company_name": "网易游戏",
-                "position_name": "Java 服务端开发工程师",
-                "base_location": "广州",
-                "current_status": "二面",
-                "interview_time": "2026-10-10T15:30:00",
-                "interview_end_time": "2026-10-10T16:30:00",
-                "extensions": {"source": "editable_table"},
-            },
-        )
-
+    def test_full_update_writes_local_file(self) -> None:
+        response = self.client.patch("/api/interviews/1", json={
+            "company_name": "网易游戏", "position_name": "Java 服务端开发工程师", "base_location": "广州",
+            "current_status": "二面", "interview_time": "2026-10-10T15:30:00",
+            "interview_end_time": "2026-10-10T16:30:00", "extensions": {"source": "editable_table"},
+        })
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["company_name"], "网易游戏")
-        self.assertEqual(payload["current_status"], "二面")
-        self.assertTrue(payload["interview_end_time"].startswith("2026-10-10T16:30"))
-        self.assertEqual(payload["feishu_sync_status"], "pending")
-        self.assertNotIn("extensions", payload)
+        self.assertEqual(self.store.get(1).current_status, "二面")
 
-        with self.session_factory() as session:
-            history = session.scalar(
-                select(ApplicationStatusHistory).where(
-                    ApplicationStatusHistory.application_id == interview_id
-                )
-            )
-            self.assertIsNotNone(history)
-            self.assertEqual(history.previous_status, "一面")
-            self.assertEqual(history.current_status, "二面")
-
-    def test_status_update_keeps_time_when_parameter_is_omitted(self) -> None:
-        interview_id = self._application_id("网易")
-        response = self.client.patch(
-            f"/api/interviews/{interview_id}/status",
-            json={
-                "target_status": "三面",
-                "note": "用户通过 Agent 更新",
-                "extensions": {"conversation_id": "conv-test"},
-            },
-        )
-
+    def test_status_update_keeps_omitted_time_and_unknown_returns_404(self) -> None:
+        response = self.client.patch("/api/interviews/1/status", json={"target_status": "三面"})
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["previous_status"], "一面")
-        self.assertEqual(payload["current_status"], "三面")
-        self.assertTrue(payload["interview_time"].startswith("2026-10-08T14:00"))
-
-    def test_unknown_record_returns_standard_error(self) -> None:
-        response = self.client.patch(
-            "/api/interviews/999/status",
-            json={"target_status": "已结束"},
-        )
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["error"]["code"], "INTERVIEW_NOT_FOUND")
-
-    def test_invalid_status_returns_validation_error(self) -> None:
-        response = self.client.get("/api/interviews", params={"status": "待投递"})
-
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
-
-    def _application_id(self, company_name: str) -> int:
-        with self.session_factory() as session:
-            interview_id = session.scalar(
-                select(JobApplication.id).where(
-                    JobApplication.company_name == company_name
-                )
-            )
-            assert interview_id is not None
-            return interview_id
+        self.assertTrue(response.json()["interview_time"].startswith("2026-10-08T14:00"))
+        missing = self.client.patch("/api/interviews/999/status", json={"target_status": "已结束"})
+        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == "__main__":

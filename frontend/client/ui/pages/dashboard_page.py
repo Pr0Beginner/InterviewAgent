@@ -119,15 +119,9 @@ class DashboardPage(QWidget):
         email_button.setObjectName("SecondaryButton")
         email_button.setIcon(app_icon("mail"))
         email_button.clicked.connect(self._sync_email)
-        feishu_button = self.feishu_button = QPushButton("同步飞书")
-        feishu_button.setObjectName("PrimaryButton")
-        feishu_button.setIcon(app_icon("sync", "#FFFFFF"))
-        feishu_button.clicked.connect(self._sync_feishu)
-
         header.addLayout(heading_box)
         header.addStretch()
         header.addWidget(email_button)
-        header.addWidget(feishu_button)
         layout.addLayout(header)
         self.integration_notice = StatusNotice()
         self.integration_notice.setWordWrap(True)
@@ -220,7 +214,7 @@ class DashboardPage(QWidget):
         self.table.viewport().installEventFilter(self)
         self.table_stack = QStackedWidget()
         self.table_stack.addWidget(self.table)
-        empty = QLabel("暂无投递记录\n\n可以切换状态筛选，或同步飞书导入投递。")
+        empty = QLabel("暂无投递记录\n\n可以通过 Agent 添加投递记录。")
         empty.setObjectName("MutedLabel")
         empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.setWordWrap(True)
@@ -597,26 +591,12 @@ class DashboardPage(QWidget):
         if not self.has_pending_changes:
             self.refresh()
 
-    def _sync_feishu(self) -> None:
-        if self.runner.busy:
-            return
-        self._integration_busy("正在同步飞书…")
-        self.runner.start("sync_feishu", self._feishu_finished)
-
-    def _feishu_finished(self, result):
-        review = len(result.get("needs_review", []))
-        self.integration_notice.setText(f"飞书同步完成：成功 {result['success_count']} 条，失败 {result['failed_count']} 条，需核对 {review} 条。")
-        if not self.has_pending_changes:
-            self.refresh()
-
     def _integration_busy(self, message):
         self.integration_notice.setText(message)
         self.email_button.setEnabled(False)
-        self.feishu_button.setEnabled(False)
 
     def _integration_ready(self):
         self.email_button.setEnabled(self._email_task_id is None)
-        self.feishu_button.setEnabled(True)
 
     def _integration_error(self, message):
         self._poll_timer.stop()

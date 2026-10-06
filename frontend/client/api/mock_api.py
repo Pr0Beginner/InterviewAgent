@@ -156,7 +156,6 @@ class MockApiClient(ApiClient):
             "current_status": target_status,
             "interview_time": record["interview_time"],
             "note": note,
-            "feishu_sync_status": "success",
             "updated_at": record["updated_at"],
         }
 
@@ -187,7 +186,7 @@ class MockApiClient(ApiClient):
                 "updated_at": _now(),
             }
         )
-        return {**deepcopy(record), "feishu_sync_status": "success"}
+        return deepcopy(record)
 
     def sync_email(
         self, limit: int = 50, scope: str = "unread",
@@ -196,16 +195,6 @@ class MockApiClient(ApiClient):
         task_id = f"mail-{uuid4().hex[:8]}"
         return {"task_id": task_id, "status": "accepted", "created_at": _now(),
                 "limit": limit, "scope": scope}
-
-    def sync_feishu(
-        self, extensions: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        return {
-            "status": "success",
-            "success_count": len(self._interviews),
-            "failed_count": 0,
-            "synced_at": _now(),
-        }
 
     def recommend_jobs(
         self,

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.models.enums import InterviewStatus
@@ -70,9 +68,7 @@ class InterviewUpdateRequest(ExtensibleRequest):
 
 
 class InterviewUpdateResponse(InterviewRecord):
-    """已保存的投递记录及其待同步到飞书的状态。"""
-
-    feishu_sync_status: Literal["pending"] = "pending"
+    """已保存到本地文件的投递记录。"""
 
 
 class InterviewStatusUpdateRequest(ExtensibleRequest):
@@ -97,5 +93,4 @@ class InterviewStatusUpdateResponse(BaseModel):
     previous_status: InterviewStatus
     current_status: InterviewStatus
     interview_time: datetime | None
-    feishu_sync_status: Literal["pending"] = "pending"
     updated_at: datetime

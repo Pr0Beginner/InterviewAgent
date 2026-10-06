@@ -25,7 +25,6 @@ class BusinessHttpTest(unittest.IsolatedAsyncioTestCase):
             ("get_mock_interview", {"session_id": "m1"}, "GET", "/mock-interviews/m1"),
             ("sync_email", {"limit": 10, "scope": "read"}, "POST", "/email/sync"),
             ("get_task", {"task_id": "mail1"}, "GET", "/tasks/mail1"),
-            ("sync_feishu", {"extensions": {}}, "POST", "/feishu/sync"),
         ]
         for name, params, method, path in operations:
             await api.invoke_async(name, **params)
@@ -40,7 +39,7 @@ class BusinessHttpTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_integrations_report_missing_configuration_without_fallback(self):
         api = HybridApiClient("http://testserver/api", transport=httpx.MockTransport(
-            lambda request: httpx.Response(503, json={"error": {"message": "请配置目标飞书文档。"}})))
+            lambda request: httpx.Response(503, json={"error": {"message": "请配置网易邮箱授权码。"}})))
         self.addCleanup(api.close)
-        with self.assertRaisesRegex(ApiRequestError, "目标飞书文档"):
-            await api.invoke_async("sync_feishu", extensions={})
+        with self.assertRaisesRegex(ApiRequestError, "网易邮箱授权码"):
+            await api.invoke_async("sync_email", limit=10, scope="unread")

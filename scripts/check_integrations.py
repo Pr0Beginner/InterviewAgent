@@ -1,4 +1,4 @@
-"""只读验证外部集成；不写飞书、不标邮件已读，也不调用付费模型。"""
+"""只读验证网易邮箱，并可选检查 BOSS 页面；不调用付费模型。"""
 
 import argparse
 import asyncio
@@ -11,20 +11,7 @@ from playwright.async_api import async_playwright, Error as BrowserError
 
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ApplicationError
-from backend.app.integrations.feishu import FeishuClient
 from backend.app.integrations.mail import NeteaseMailbox
-
-
-def check_feishu():
-    """分别检查进度、日期和个人面经，只输出结构摘要。"""
-    client = FeishuClient()
-    progress = client.read()
-    experience = client.read_experience()
-    return {"progress_status": progress["status"], "progress_records": len(progress["records"]),
-            "date_status": progress.get("schedule", {}).get("status"), "date_events": len(progress.get("schedule", {}).get("events", [])),
-            "date_error": progress.get("schedule", {}).get("error"), "needs_review": len(progress.get("needs_review", [])),
-            "experience_status": experience["status"], "experience_owner": experience["owner"],
-            "experience_sections": len(experience["sections"]), "readonly": True}
 
 
 def check_mail():
@@ -72,16 +59,15 @@ async def check_boss():
 
 
 def main():
-    """默认检查飞书和邮箱；--boss 额外进行一次不登录的公开页面探测。"""
+    """默认检查邮箱；--boss 额外进行一次不登录的公开页面探测。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--boss", action="store_true", help="额外只读验证 BOSS 公开页面")
     args = parser.parse_args()
-    for name, check in (("feishu", check_feishu), ("netease", check_mail)):
-        try:
-            result = check()
-        except ApplicationError as exc:
-            result = {"status": "failed", "code": exc.code, "message": exc.message}
-        print(json.dumps({"check": name, **result}, ensure_ascii=False), flush=True)
+    try:
+        result = check_mail()
+    except ApplicationError as exc:
+        result = {"status": "failed", "code": exc.code, "message": exc.message}
+    print(json.dumps({"check": "netease", **result}, ensure_ascii=False), flush=True)
     if args.boss:
         print(json.dumps({"check": "boss", **asyncio.run(check_boss())}, ensure_ascii=False), flush=True)
 

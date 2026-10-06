@@ -59,7 +59,6 @@ class HybridApiClientTest(unittest.TestCase):
                     "interview_end_time": "2026-10-08T15:00:00",
                     "job_url": None,
                     "updated_at": "2026-09-30T16:00:00",
-                    "feishu_sync_status": "pending",
                 },
             )
 

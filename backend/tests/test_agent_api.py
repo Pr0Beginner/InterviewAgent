@@ -1,15 +1,13 @@
 """接口协议和工具循环测试，不调用付费模型或用户数据库。"""
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.app.agent.errors import AgentError
 from backend.app.agent.runtime import AgentRuntime
 from backend.app.agent.prompts import system_prompt
@@ -22,9 +20,8 @@ from backend.app.agent.tools import (
 )
 from backend.app.api.routes.chat import get_agent_runtime
 from backend.app.core.config import Settings
-from backend.app.db.base import Base
 from backend.app.main import create_app
-from backend.app.models import JobApplication
+from backend.app.storage.local import MarkdownInterviewStore
 
 
 def native_chunk(delta: dict, finish=None, usage=None) -> dict:
@@ -81,17 +78,14 @@ class AgentApiTest(unittest.TestCase):
         self.assertNotIn("extensions", provider.requests[0])
 
     def test_fragmented_tool_call_queries_real_records_then_streams_answer(self):
-        engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
-        self.addCleanup(engine.dispose)
-        Base.metadata.create_all(engine)
-        factory = sessionmaker(engine)
-        with factory() as session:
-            session.add(JobApplication(company_name="网易", position_name="Java 后端", base_location="杭州", current_status="一面"))
-            session.commit()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        store = MarkdownInterviewStore(Path(temporary.name) / "interviews.md")
+        store.create({"company_name": "网易", "position_name": "Java 后端", "base_location": "杭州", "current_status": "一面", "interview_time": None, "interview_end_time": None, "job_url": None})
 
         def executor(name, arguments):
             self.assertEqual(name, "query_interview_status")
-            return run_interview_query(InterviewQuery.model_validate_json(arguments), factory)
+            return run_interview_query(InterviewQuery.model_validate_json(arguments), store)
 
         provider = FakeProvider([
             [native_chunk({"tool_calls": [{"index": 0, "id": "call-1", "function": {"name": "query_interview_status", "arguments": '{"company_name":'}}]}),
@@ -112,7 +106,7 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(chunks[-1].choices, [])
         tool_result = json.loads(provider.requests[1]["messages"][-1]["content"])
         self.assertEqual(tool_result["items"][0]["current_status"], "一面")
-        self.assertEqual(tool_result["feishu_sync_status"], "not_connected")
+        self.assertEqual(tool_result["source"], "local_markdown")
 
     def test_missing_key_returns_service_error_not_mock_reply(self):
         self.app.dependency_overrides[get_agent_runtime] = lambda: AgentRuntime(self.settings)
