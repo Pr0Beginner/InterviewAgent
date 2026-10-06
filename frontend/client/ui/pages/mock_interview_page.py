@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from html import escape
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QSettings, QSize, Signal, Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -16,10 +17,10 @@ from PySide6.QtWidgets import (
 )
 
 from client.api.base import ApiClient
+from client.ui.icons import app_icon
 from client.ui.widgets.api_task import TaskRunner
 from client.ui.widgets.status_notice import StatusNotice
 from client.ui.widgets.glass_combo import GlassComboBox
-from PySide6.QtCore import QSettings
 
 
 class MockInterviewPage(QWidget):
@@ -49,6 +50,7 @@ class MockInterviewPage(QWidget):
         self.api = api
         self.session_id: str | None = None
         self.question_id: str | None = None
+        self.resume_id: str | None = None
         self.runner = TaskRunner(api, self)
         self.runner.failed.connect(self._failed)
         self.runner.idle.connect(self._ready)
@@ -98,6 +100,31 @@ class MockInterviewPage(QWidget):
             group.addWidget(label)
             group.addWidget(field)
             settings.addLayout(group)
+        resume_group = QVBoxLayout()
+        resume_group.setSpacing(6)
+        resume_label = QLabel("个人简历（可选）")
+        resume_label.setObjectName("MutedLabel")
+        resume_row = QHBoxLayout()
+        resume_row.setSpacing(8)
+        self.resume_button = QPushButton()
+        self.resume_button.setObjectName("ResumeUploadButton")
+        self.resume_button.setIcon(app_icon("paperclip", color="#746B81", active="#8061BE"))
+        self.resume_button.setIconSize(QSize(22, 22))
+        self.resume_button.setFixedSize(38, 38)
+        self.resume_button.setToolTip("上传 PDF 或 DOCX 简历")
+        self.resume_button.setAccessibleName("上传简历")
+        self.resume_button.clicked.connect(self._select_resume)
+        resume_label.setBuddy(self.resume_button)
+        self.resume_name = QLabel("上传 PDF / DOCX")
+        self.resume_name.setObjectName("ResumeFileName")
+        self.resume_name.setMinimumWidth(130)
+        self.resume_name.setMaximumWidth(210)
+        self.resume_name.setToolTip("解析后的文本会保存在本地，用于根据技术栈和项目提问。")
+        resume_row.addWidget(self.resume_button)
+        resume_row.addWidget(self.resume_name)
+        resume_group.addWidget(resume_label)
+        resume_group.addLayout(resume_row)
+        settings.addLayout(resume_group)
         settings.addWidget(start_button)
         self.restore_button = QPushButton("恢复上次")
         self.restore_button.setObjectName("SecondaryButton")
@@ -139,6 +166,29 @@ class MockInterviewPage(QWidget):
         actions.addWidget(submit_button)
         layout.addLayout(actions)
 
+    def _select_resume(self) -> None:
+        """选择并上传简历，界面只保留服务端返回的本地简历 ID。"""
+        if self.runner.busy:
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择简历",
+            "",
+            "简历文件 (*.pdf *.docx)",
+        )
+        if not file_path:
+            return
+        self._busy("正在解析简历…")
+        self.runner.start("upload_resume", self._resume_uploaded, file_path=file_path)
+
+    def _resume_uploaded(self, result) -> None:
+        self.resume_id = result["id"]
+        self.resume_name.setText(result["file_name"])
+        self.resume_name.setToolTip(
+            f"已解析 {result['character_count']} 个字符，文本已保存到本地。"
+        )
+        self.notice.setText("简历解析完成，面试题会优先结合其中的技术栈和项目经历。")
+
     def _start_interview(self) -> None:
         if self.runner.busy:
             return
@@ -154,6 +204,7 @@ class MockInterviewPage(QWidget):
             position_name=position_name,
             interview_round=self.round_combo.currentText(),
             interview_focus=["AI应用", "全栈开发", "Agent"],
+            resume_id=self.resume_id,
         )
 
     def _started(self, result):
@@ -227,6 +278,13 @@ class MockInterviewPage(QWidget):
         self.company_combo.setCurrentText(context.get("company_name") or self.TARGET_COMPANIES[0])
         self.position_input.setText(context.get("position_name", "AI全栈开发工程师"))
         self.round_combo.setCurrentText(context.get("interview_round", "一面"))
+        self.resume_id = context.get("resume_id")
+        if self.resume_id:
+            self.resume_name.setText(context.get("resume_file_name", "已关联简历"))
+            self.resume_name.setToolTip("已恢复本次面试关联的本地简历。")
+        else:
+            self.resume_name.setText("上传 PDF / DOCX")
+            self.resume_name.setToolTip("解析后的文本会保存在本地，用于根据技术栈和项目提问。")
         self.transcript.clear()
         for turn in result["turns"]:
             self._append_interviewer(turn["question"])
@@ -241,11 +299,11 @@ class MockInterviewPage(QWidget):
 
     def _busy(self, message):
         self.notice.setText(message)
-        for button in (self.start_button, self.restore_button, self.submit_button, self.finish_button):
+        for button in (self.resume_button, self.start_button, self.restore_button, self.submit_button, self.finish_button):
             button.setEnabled(False)
 
     def _ready(self):
-        for button in (self.start_button, self.restore_button, self.submit_button, self.finish_button):
+        for button in (self.resume_button, self.start_button, self.restore_button, self.submit_button, self.finish_button):
             button.setEnabled(True)
 
     def _failed(self, message):

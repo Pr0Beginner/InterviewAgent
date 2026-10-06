@@ -1,27 +1,148 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl, Signal, Qt
-from PySide6.QtGui import QDesktopServices
+from html import escape
+
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from client.api.base import ApiClient
 from client.ui.icons import app_icon
 from client.ui.widgets.api_task import TaskRunner
+from client.ui.widgets.glass_combo import GlassComboBox
 from client.ui.widgets.status_notice import StatusNotice
-from client.ui.widgets.glass import soft_shadow
+
+
+CITY_OPTIONS = (
+    "北京", "上海", "广州", "深圳", "杭州", "南京", "苏州",
+    "武汉", "成都", "西安", "长沙", "天津", "重庆",
+)
+WORK_EXPERIENCE_OPTIONS = (
+    "不限", "应届生", "1年以内", "1-3年", "3-5年", "5-10年", "10年以上",
+)
 
 
 def _split_values(value: str) -> list[str]:
-    return [item.strip() for item in value.replace("，", ",").split(",") if item.strip()]
+    return list(dict.fromkeys(
+        item.strip() for item in value.replace("，", ",").split(",") if item.strip()
+    ))
+
+
+class CityMultiSelect(QWidget):
+    """保持菜单展开的多选城市控件，向业务层只暴露已选择城市列表。"""
+
+    selection_changed = Signal(list)
+
+    def __init__(self, selected: list[str] | None = None, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.button = QPushButton()
+        self.button.setObjectName("CityPicker")
+        self.button.setAccessibleName("目标城市，多选")
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu = QMenu(self.button)
+        self.menu.setObjectName("CityPickerMenu")
+        self.options: dict[str, QCheckBox] = {}
+        chosen = set(selected or [])
+        for city in CITY_OPTIONS:
+            checkbox = QCheckBox(city)
+            checkbox.setObjectName("CityOption")
+            checkbox.setMinimumWidth(176)
+            checkbox.setChecked(city in chosen)
+            checkbox.toggled.connect(self._selection_updated)
+            action = QWidgetAction(self.menu)
+            action.setDefaultWidget(checkbox)
+            self.menu.addAction(action)
+            self.options[city] = checkbox
+        self.button.setMenu(self.menu)
+        layout.addWidget(self.button)
+        self._selection_updated()
+
+    def selected_cities(self) -> list[str]:
+        return [city for city, option in self.options.items() if option.isChecked()]
+
+    def set_selected_cities(self, cities: list[str]) -> None:
+        selected = set(cities)
+        for city, option in self.options.items():
+            option.blockSignals(True)
+            option.setChecked(city in selected)
+            option.blockSignals(False)
+        self._selection_updated()
+
+    def _selection_updated(self) -> None:
+        selected = self.selected_cities()
+        if not selected:
+            caption = "不限城市"
+        elif len(selected) <= 3:
+            caption = "、".join(selected)
+        else:
+            caption = "、".join(selected[:3]) + f" 等 {len(selected)} 个城市"
+        self.button.setText(caption)
+        self.button.setToolTip("已选择：" + ("、".join(selected) if selected else "不限城市"))
+        self.selection_changed.emit(selected)
+
+
+class HoverJobDescription(QFrame):
+    """默认仅显示一行入口，悬浮或键盘聚焦时展开有边界的 JD。"""
+
+    def __init__(self, description: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("JdHoverArea")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.trigger = QLabel("查看岗位 JD")
+        self.trigger.setObjectName("JdTrigger")
+        self.trigger.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.trigger.setAccessibleName("查看岗位 JD，鼠标悬浮或键盘聚焦后显示")
+        layout.addWidget(self.trigger)
+
+        self.preview = QFrame()
+        self.preview.setObjectName("JdPreview")
+        preview_layout = QVBoxLayout(self.preview)
+        preview_layout.setContentsMargins(16, 14, 16, 14)
+        detail = QLabel(description or "该岗位暂未提供 JD。")
+        detail.setObjectName("JdText")
+        detail.setTextFormat(Qt.TextFormat.PlainText)
+        detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        detail.setWordWrap(True)
+        preview_layout.addWidget(detail)
+        self.preview.setVisible(False)
+        layout.addWidget(self.preview)
+
+    def enterEvent(self, event) -> None:
+        self.preview.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if not self.hasFocus():
+            self.preview.setVisible(False)
+        super().leaveEvent(event)
+
+    def focusInEvent(self, event) -> None:
+        self.preview.setVisible(True)
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self.preview.setVisible(False)
+        super().focusOutEvent(event)
 
 
 class JobsPage(QWidget):
@@ -31,7 +152,7 @@ class JobsPage(QWidget):
         super().__init__(parent)
         self.api = api
         self.current_page = 1
-        self.page_size = 2
+        self.page_size = 5
         self.total_pages = 1
         self._search_filters = None
         self.runner = TaskRunner(api, self)
@@ -44,50 +165,57 @@ class JobsPage(QWidget):
         self.setObjectName("PageSurface")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
         title = QLabel("推荐岗位")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("发现适合你的机会，了解每一份推荐的理由")
+        subtitle = QLabel("先按城市找到真实岗位，再由 Agent 阅读 JD 并排序")
         subtitle.setObjectName("PageSubtitle")
         heading = QVBoxLayout()
-        heading.setSpacing(6)
+        heading.setSpacing(5)
         heading.addWidget(title)
         heading.addWidget(subtitle)
         layout.addLayout(heading)
 
         filter_frame = QFrame()
-        filter_frame.setObjectName("Toolbar")
+        filter_frame.setObjectName("JobSearchToolbar")
         filters = QHBoxLayout(filter_frame)
-        filters.setContentsMargins(12, 9, 12, 9)
-        self.city_input = QLineEdit("上海,杭州")
-        self.city_input.setPlaceholderText("目标城市，用逗号分隔")
-        self.city_input.setAccessibleName("目标城市")
-        self.tech_input = QLineEdit("Java,Spring Boot,MySQL")
-        self.tech_input.setPlaceholderText("技术栈，用逗号分隔")
-        self.tech_input.setAccessibleName("技术栈")
-        self.keyword_input = QLineEdit("Java")
-        self.keyword_input.setPlaceholderText("岗位关键词")
+        filters.setContentsMargins(16, 13, 16, 13)
+        filters.setSpacing(14)
+
+        self.city_picker = CityMultiSelect(["上海", "杭州"])
+        self.experience_combo = GlassComboBox()
+        self.experience_combo.addItems(WORK_EXPERIENCE_OPTIONS)
+        self.experience_combo.setCurrentText("应届生")
+        self.experience_combo.setAccessibleName("工作经验")
+        self.keyword_input = QLineEdit("Java 后端")
+        self.keyword_input.setPlaceholderText("例如：Java 后端、分布式开发")
         self.keyword_input.setAccessibleName("岗位关键词")
-        search_button = self.search_button = QPushButton("重新匹配")
-        search_button.setObjectName("PrimaryButton")
-        search_button.setIcon(app_icon("search", "#FFFFFF"))
-        search_button.clicked.connect(self.search_jobs)
-        for caption, field in (("目标城市", self.city_input), ("技术栈", self.tech_input), ("岗位关键词", self.keyword_input)):
+        for caption, field, stretch in (
+            ("目标城市（可多选）", self.city_picker, 2),
+            ("工作经验", self.experience_combo, 1),
+            ("岗位关键词", self.keyword_input, 3),
+        ):
             group = QVBoxLayout()
             group.setSpacing(6)
             label = QLabel(caption)
-            label.setObjectName("MutedLabel")
+            label.setObjectName("JobFilterLabel")
             label.setBuddy(field)
             group.addWidget(label)
             group.addWidget(field)
-            filters.addLayout(group, 1)
-        filters.addWidget(search_button)
-        filters.setAlignment(search_button, Qt.AlignmentFlag.AlignBottom)
+            filters.addLayout(group, stretch)
+
+        self.search_button = QPushButton("搜索并分析")
+        self.search_button.setObjectName("PrimaryButton")
+        self.search_button.setIcon(app_icon("search", "#FFFFFF"))
+        self.search_button.clicked.connect(self.search_jobs)
+        filters.addWidget(self.search_button)
+        filters.setAlignment(self.search_button, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(filter_frame)
+
         self.notice = StatusNotice()
         self.notice.setWordWrap(True)
-        self.notice.setObjectName("MutedLabel")
+        self.notice.setObjectName("JobNotice")
         layout.addWidget(self.notice)
 
         scroll = QScrollArea()
@@ -95,7 +223,7 @@ class JobsPage(QWidget):
         self.list_container = QWidget()
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setContentsMargins(0, 0, 8, 0)
-        self.list_layout.setSpacing(14)
+        self.list_layout.setSpacing(10)
         self.list_layout.addStretch()
         scroll.setWidget(self.list_container)
         layout.addWidget(scroll, 1)
@@ -120,17 +248,22 @@ class JobsPage(QWidget):
         if self.runner.busy:
             return
         self.current_page = 1
-        self._load_jobs(announce=True, refresh=True)
+        self._load_jobs(refresh=True)
 
-    def _load_jobs(self, announce: bool = False, refresh=False, cached_only=False) -> None:
+    def _load_jobs(self, refresh: bool = False, cached_only: bool = False) -> None:
         if refresh or self._search_filters is None:
-            self._search_filters = {"cities": _split_values(self.city_input.text()),
-                "tech_stack": _split_values(self.tech_input.text()), "keywords": _split_values(self.keyword_input.text())}
+            self._search_filters = {
+                "cities": self.city_picker.selected_cities(),
+                "work_experience": self.experience_combo.currentText(),
+                "keywords": _split_values(self.keyword_input.text()),
+            }
         self.search_button.setEnabled(False)
         self.previous_button.setEnabled(False)
         self.next_button.setEnabled(False)
-        self.notice.setText("正在加载…" if cached_only else "正在获取岗位和分析 JD，请稍候…")
-        self.runner.start("recommend_jobs", self._loaded,
+        self.notice.setText("正在加载…" if cached_only else "正在抓取岗位并由 Agent 阅读 JD，请稍候…")
+        self.runner.start(
+            "recommend_jobs",
+            self._loaded,
             **self._search_filters,
             page=self.current_page,
             page_size=self.page_size,
@@ -146,7 +279,7 @@ class JobsPage(QWidget):
         )
         self.previous_button.setEnabled(result["has_previous"])
         self.next_button.setEnabled(result["has_next"])
-        self.notice.setText(result.get("message") or f"本次候选中共有 {result['total']} 个匹配岗位。")
+        self.notice.setText(result.get("message") or f"已整理 {result['total']} 个真实岗位，按 Agent 判断结果排序。")
 
     def _show_error(self, message):
         self.notice.setText(message)
@@ -168,70 +301,87 @@ class JobsPage(QWidget):
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for job in jobs:
-            self.list_layout.insertWidget(self.list_layout.count() - 1, self._create_card(job))
+        if not jobs:
+            empty = QLabel("还没有岗位结果。选择城市和关键词后开始搜索。")
+            empty.setObjectName("JobEmptyState")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.list_layout.insertWidget(0, empty)
+            return
+        start = (self.current_page - 1) * self.page_size + 1
+        for offset, job in enumerate(jobs):
+            self.list_layout.insertWidget(
+                self.list_layout.count() - 1,
+                self._create_card(job, start + offset),
+            )
 
-    def _create_card(self, job: dict) -> QFrame:
+    def _create_card(self, job: dict, sequence: int) -> QFrame:
         card = QFrame()
-        card.setObjectName("Card")
-        soft_shadow(card, blur=22, opacity=16, offset=6)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(14)
+        card.setObjectName("JobResultRow")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(18, 16, 18, 16)
+        row.setSpacing(16)
 
-        top = QHBoxLayout()
-        title = QLabel(job['position_name'])
-        title.setTextFormat(Qt.TextFormat.PlainText)
-        title.setWordWrap(True)
-        title.setObjectName("SectionTitle")
-        score = QLabel(f"匹配度 {job['match_score']}%")
-        score.setObjectName("ScoreBadge")
-        top.addWidget(title)
-        top.addStretch()
-        top.addWidget(score)
-        layout.addLayout(top)
+        number = QLabel(f"{sequence:02d}")
+        number.setObjectName("JobSequence")
+        number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        number.setFixedSize(46, 46)
+        row.addWidget(number, 0, Qt.AlignmentFlag.AlignTop)
 
-        meta = QLabel(f"{job['company_name']}    /    {job['base_location']}\n{job['jd_summary']}")
-        meta.setObjectName("MutedLabel")
-        meta.setWordWrap(True)
-        layout.addWidget(meta)
+        content = QVBoxLayout()
+        content.setSpacing(11)
+        fields = QGridLayout()
+        fields.setHorizontalSpacing(22)
+        fields.setVerticalSpacing(4)
+        fields.addWidget(self._field_label("公司"), 0, 0)
+        fields.addWidget(self._field_label("岗位"), 0, 1)
+        fields.addWidget(self._field_value(job.get("company_name") or "待确认", prominent=True), 1, 0)
+        fields.addWidget(self._field_value(job.get("position_name") or "待确认", prominent=True), 1, 1)
+        fields.addWidget(self._field_label("地点"), 2, 0)
+        fields.addWidget(self._field_label("薪资范围"), 2, 1)
+        fields.addWidget(self._field_value(job.get("base_location") or "待确认"), 3, 0)
+        fields.addWidget(self._field_value(job.get("salary") or "待确认", salary=True), 3, 1)
+        fields.setColumnStretch(0, 2)
+        fields.setColumnStretch(1, 3)
+        content.addLayout(fields)
 
-        reasons = QLabel("匹配点：" + "；".join(job["match_reasons"]))
-        reasons.setObjectName("ReasonBox")
-        reasons.setWordWrap(True)
-        layout.addWidget(reasons)
+        actions = QFrame(card)
+        actions.setObjectName("JobActions")
+        actions.setMinimumWidth(180)
+        actions.setMaximumWidth(300)
+        action_layout = QVBoxLayout(actions)
+        action_layout.setContentsMargins(16, 2, 0, 2)
+        action_layout.setSpacing(8)
 
-        risks = QLabel("风险点：" + "；".join(job["risk_points"]))
-        risks.setObjectName("RiskBox")
-        risks.setWordWrap(True)
-        layout.addWidget(risks)
+        url = str(job.get("job_url") or "")
+        if url:
+            link = QLabel(f'<a href="{escape(url, quote=True)}">打开岗位链接</a>', actions)
+            link.setOpenExternalLinks(True)
+            link.setToolTip(url)
+        else:
+            link = QLabel("岗位链接待确认", actions)
+        link.setObjectName("JobLink")
+        link.setAccessibleName("岗位链接")
+        link.setAlignment(Qt.AlignmentFlag.AlignRight)
+        action_layout.addWidget(link)
 
-        jd = QLabel(job["job_description"])
-        jd.setTextFormat(Qt.TextFormat.PlainText)
-        jd.setObjectName("JdBox")
-        jd.setWordWrap(True)
-        jd.setVisible(False)
-        layout.addWidget(jd)
-
-        actions = QHBoxLayout()
-        details_button = QPushButton("展开 JD")
-        details_button.setObjectName("SecondaryButton")
-        details_button.clicked.connect(
-            lambda _checked=False, label=jd, button=details_button: self._toggle_jd(label, button)
-        )
-        apply_button = QPushButton("去投递")
-        apply_button.setObjectName("PrimaryButton")
-        apply_button.clicked.connect(
-            lambda _checked=False, url=job["job_url"]: QDesktopServices.openUrl(QUrl(url))
-        )
-        actions.addStretch()
-        actions.addWidget(details_button)
-        actions.addWidget(apply_button)
-        layout.addLayout(actions)
+        jd = HoverJobDescription(job.get("job_description") or "", actions)
+        jd.trigger.setAlignment(Qt.AlignmentFlag.AlignRight)
+        action_layout.addWidget(jd)
+        action_layout.addStretch()
+        row.addLayout(content, 1)
+        row.addWidget(actions, 0, Qt.AlignmentFlag.AlignTop)
         return card
 
     @staticmethod
-    def _toggle_jd(label: QLabel, button: QPushButton) -> None:
-        visible = not label.isVisible()
-        label.setVisible(visible)
-        button.setText("收起 JD" if visible else "展开 JD")
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("JobFieldLabel")
+        return label
+
+    @staticmethod
+    def _field_value(text: str, prominent: bool = False, salary: bool = False) -> QLabel:
+        label = QLabel(text)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setObjectName("JobSalary" if salary else "JobPrimaryValue" if prominent else "JobFieldValue")
+        return label

@@ -1,16 +1,25 @@
 """投递新增、外部集成、岗位推荐和模拟面试接口。"""
 
+import asyncio
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 
 from backend.app.agent.workflows import InterviewWorkflows
-from backend.app.schemas.business import CreateInterview, EmailSyncRequest, JobSearchRequest, MockInterviewRequest, MockAnswerRequest
+from backend.app.schemas.business import (
+    CreateInterview,
+    EmailCandidateCreateRequest,
+    EmailSyncRequest,
+    JobSearchRequest,
+    MockInterviewRequest,
+    MockAnswerRequest,
+)
 from backend.app.schemas.common import ExtensibleRequest
 from backend.app.services.email_sync import EmailSyncService
 from backend.app.services.jobs import JobService
 from backend.app.services.mock_interviews import MockInterviewService
+from backend.app.services.resumes import ResumeService
 
 router = APIRouter(tags=["Business"])
 
@@ -18,6 +27,11 @@ router = APIRouter(tags=["Business"])
 def get_mock_service():
     """创建模拟面试服务，其依赖可在测试中替换。"""
     return MockInterviewService()
+
+
+def get_resume_service():
+    """创建本地简历解析服务，其依赖可在测试中替换。"""
+    return ResumeService()
 
 
 def get_job_service():
@@ -46,6 +60,12 @@ def get_task(task_id: str):
     return EmailSyncService().get_task(task_id)
 
 
+@router.post("/email/candidates/create")
+def create_email_candidates(request: EmailCandidateCreateRequest):
+    """根据前端明确勾选的邮件候选项创建本地投递记录。"""
+    return EmailSyncService().create_candidates(request.candidate_ids)
+
+
 @router.post("/job-recommendations")
 async def recommend_jobs(request: JobSearchRequest, service: Annotated[JobService, Depends(get_job_service)]):
     """读取真实岗位页面、评估匹配度，并返回缓存结果中的一页。"""
@@ -56,6 +76,17 @@ async def recommend_jobs(request: JobSearchRequest, service: Annotated[JobServic
 def get_job(recommendation_id: str, service: Annotated[JobService, Depends(get_job_service)]):
     """根据推荐记录 ID 返回已保存的 JD、评分和来源链接。"""
     return service.get(recommendation_id)
+
+
+@router.post("/mock-interviews/resumes", status_code=201)
+async def upload_mock_resume(
+    file: Annotated[UploadFile, File(...)],
+    service: Annotated[ResumeService, Depends(get_resume_service)],
+):
+    """解析 PDF/DOCX 简历并把提取后的文本保存到本地。"""
+    data = await file.read(ResumeService.MAX_BYTES + 1)
+    await file.close()
+    return await asyncio.to_thread(service.save, file.filename, data)
 
 
 @router.post("/mock-interviews", status_code=201)

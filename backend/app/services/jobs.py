@@ -1,32 +1,43 @@
 """使用 Skill 对真实 JD 进行匹配排序，并缓存结果以保持分页稳定。"""
 
+import asyncio
 from hashlib import sha256
 import json
-from pathlib import Path
 from uuid import uuid4
 
 from backend.app.agent.provider import DeepSeekProvider
+from backend.app.agent.memory import JobPreferenceMemoryStore
+from backend.app.agent.skills import load_skill
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ApplicationError
 from backend.app.integrations.boss import BossJobSource
-from backend.app.schemas.business import JobAssessment
+from backend.app.schemas.business import JobAssessmentBatch
 from backend.app.storage.local import LocalStateStore
 
-SKILL = (Path(__file__).resolve().parents[1] / "agent/skills/job_recommendation.md").read_text(encoding="utf-8")
+SKILL = load_skill("job-recommendation")
+MODEL_JD_CHARACTER_LIMIT = 12000
 
 
 class JobService:
     """获取来源页面，仅评估具有真实链接和 JD 文本的岗位。"""
 
-    def __init__(self, state_store=None, provider=None, source=None):
+    def __init__(self, state_store=None, provider=None, source=None, preference_memory_store=None):
         """注入本地状态文件、匹配评估模型和 BOSS 浏览器数据源。"""
         self.state_store = state_store or LocalStateStore()
         self.provider = provider or DeepSeekProvider(get_settings())
         self.source = source or BossJobSource()
+        self.preference_memory_store = preference_memory_store or JobPreferenceMemoryStore(
+            get_settings().langgraph_sqlite_path
+        )
 
     async def recommend(self, request) -> dict:
         """创建或复用搜索快照，后续翻页不重复调用模型。"""
         criteria = request.model_dump(exclude={"page", "page_size", "extensions"})
+        preference_summary = await asyncio.to_thread(
+            self.preference_memory_store.read_summary
+        )
+        if preference_summary:
+            criteria["preference_memory"] = preference_summary
         cache_id = "jobs-" + sha256(json.dumps(criteria, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:50]
         cached = self.state_store.get("job_searches", cache_id)
         items = cached.get("result", {}).get("items") if cached and cached.get("status") == "completed" else None
@@ -34,15 +45,49 @@ class JobService:
             return self._page([], request, cache_id, "尚无匹配结果，点击重新匹配开始搜索。")
         if items is None or (request.extensions.get("refresh") and not request.extensions.get("cached_only")):
             self.provider.ensure_configured()
-            sources = await self.source.search(request.keywords or request.tech_stack, get_settings().jobs_max_candidates)
+            sources = await self.source.search(
+                request.keywords or request.tech_stack,
+                get_settings().jobs_max_candidates,
+                cities=request.cities,
+                work_experience=request.work_experience,
+            )
+            batch = await self.provider.structured(SKILL, {
+                "task": "批量评估全部岗位；每个 source_index 必须且只能返回一次",
+                "profile": criteria,
+                "sources": [
+                    {
+                        "source_index": index,
+                        **source,
+                        "job_description": source["job_description"][:MODEL_JD_CHARACTER_LIMIT],
+                    }
+                    for index, source in enumerate(sources)
+                ],
+            }, JobAssessmentBatch)
+            assessments = {item.source_index: item for item in batch.items}
+            expected_indexes = set(range(len(sources)))
+            if set(assessments) != expected_indexes:
+                raise ApplicationError(
+                    "JOB_ASSESSMENT_INCOMPLETE",
+                    "模型未完整返回岗位分析，请重试。",
+                    status_code=502,
+                    details={
+                        "expected": sorted(expected_indexes),
+                        "received": sorted(assessments),
+                    },
+                )
             items = []
-            # 限制数量并串行调用模型，避免瞬时请求过多，同时便于取消。
-            for source in sources:
-                assessment = await self.provider.structured(SKILL, {"profile": criteria, "source": source}, JobAssessment)
+            for source_index, source in enumerate(sources):
+                assessment = assessments[source_index]
                 item = assessment.model_dump()
+                item.pop("source_index")
                 if request.cities and not any(city in item["base_location"] for city in request.cities):
                     continue
-                item.update(id="job-" + uuid4().hex, job_url=source["job_url"], job_description=source["job_description"])
+                item.update(
+                    id="job-" + uuid4().hex,
+                    job_url=source["job_url"],
+                    job_description=source["job_description"],
+                    salary=source.get("salary") or "待确认",
+                )
                 items.append(item)
             items.sort(key=lambda item: item["match_score"], reverse=True)
             self.state_store.put("job_searches", cache_id, {

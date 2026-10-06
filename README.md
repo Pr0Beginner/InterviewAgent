@@ -12,7 +12,7 @@ Interview Assistant 是一个面向个人秋招管理的桌面 Agent。它把投
 | 投递管理 | 分页查询、筛选和直接编辑公司、岗位、Base、状态及笔试/面试起止时间 |
 | 邮件扫描 | 扫描网易邮箱中的未读、已读或全部邮件，提取笔试、面试、Offer 和拒信信息 |
 | 岗位推荐 | 从 BOSS 直聘读取真实岗位，按照技术栈、业务方向和 Base 地给出匹配度 |
-| 模拟面试 | 根据目标公司、岗位、轮次逐题提问，并生成面试总结 |
+| 模拟面试 | 上传 PDF/DOCX 简历，根据技术栈和项目逐题提问，并生成面试总结 |
 
 系统支持以下投递状态：
 
@@ -34,6 +34,7 @@ flowchart TB
     SERVICE --> MD[interviews.md 投递记录]
     SERVICE --> JSON[runtime.json 运行状态]
     AGENT --> SQLITE[SQLite 图检查点]
+    AGENT -. 可选观测 .-> LF[Langfuse]
     SERVICE --> MAIL[网易邮箱 IMAP]
     SERVICE --> BOSS[BOSS 直聘]
     AGENT --> LLM[DeepSeek API]
@@ -46,6 +47,7 @@ flowchart TB
 | 桌面客户端 | Python、PySide6、httpx |
 | 服务端 | Python、FastAPI、Pydantic |
 | Agent | LangGraph、ReAct、OpenAI 兼容协议、DeepSeek API |
+| Agent 可观测性 | Langfuse（可选，默认关闭） |
 | 投递记录 | 本地 Markdown |
 | 运行状态 | 本地 JSON |
 | Agent 检查点 | SQLite |
@@ -105,6 +107,24 @@ AGENT_MODEL_NAME=interview-assistant
 - `POST /v1/chat/completions`
 - `GET /v1/models`
 
+### Langfuse（可选）
+
+在 Langfuse Cloud 或自托管实例中创建项目后，进入该项目的 **Settings → API Keys** 创建项目密钥。把密钥写入本地 `backend/.env`，`LANGFUSE_BASE_URL` 使用当前 Langfuse 站点地址（自托管时填写实例地址）：
+
+```dotenv
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_TRACING_ENVIRONMENT=development
+LANGFUSE_SAMPLE_RATE=1.0
+LANGFUSE_CAPTURE_CONTENT=false
+```
+
+服务端使用 Langfuse 官方 OpenAI 包装器观测 DeepSeek：每轮聊天是一条 Agent trace，每次模型请求是一条 generation，工具调用和 LangGraph 节点保留父子层级；`conversation_id` 会作为 session ID 聚合同一会话。包装器自动记录流式首 token 延迟、模型、token 用量、异常，以及 Langfuse 能识别模型定价时的成本。
+
+默认只发送字段名、数量、状态和耗时等摘要，因此平台中看不到对话正文；只有明确设置 `LANGFUSE_CAPTURE_CONTENT=true` 才发送受限的对话与工具内容。无论该开关如何，名称含 `token`、`secret`、`password`、`cookie`、`authorization`、`api_key` 或 `auth_code` 的字段都会被替换为 `[redacted]`。Langfuse 未配置、不可用或上报失败均不影响主业务。
+
 ### 网易邮箱
 
 在网易邮箱中开启 IMAP，生成客户端授权码，然后配置：
@@ -130,6 +150,7 @@ NETEASE_EMAIL_AUTH_CODE=
 |---|---|
 | `backend/data/interviews.md` | 投递记录，可直接用文本编辑器查看 |
 | `backend/data/runtime.json` | 邮件去重、异步任务、岗位缓存和模拟面试会话 |
+| `backend/data/resumes/*.txt` | 从 PDF/DOCX 简历解析出的本地纯文本；不提交到 Git |
 | `backend/data/langgraph.sqlite3` | LangGraph 对话检查点 |
 
 这些文件首次运行时自动创建，均已加入 `.gitignore`。修改 `interviews.md` 时请保留表头和列数，并在服务停止后编辑。

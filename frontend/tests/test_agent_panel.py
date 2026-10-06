@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QCalendarWidget, QFrame, QPushButton
 from client.api.mock_api import MockApiClient
 from client.ui.main_window import MainWindow
 from client.ui.pages.dashboard_page import DashboardPage, SummaryCard
-from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble
+from client.ui.widgets.agent_panel import AgentPanel, _agent_bubble, _markdown_fragment
 from client.ui.widgets.datetime_picker import DateTimePicker, DateTimePickerDialog
 from client.ui.widgets.dialogs import AppDialog
 
@@ -98,6 +98,31 @@ class AgentPanelTest(unittest.TestCase):
         self.assertFalse(panel.is_busy)
         panel.close()
 
+    def test_email_candidate_table_requires_selection_then_creates(self):
+        """邮件新记录必须由用户在表格中明确勾选后创建。"""
+        api = MockApiClient()
+        panel = AgentPanel(api)
+        before = len(api._interviews)
+        panel.show_email_candidates([{
+            "id": "mail-candidate-test",
+            "source_subject": "卓望公司笔试通知",
+            "company_name": "卓望公司",
+            "position_name": "全栈开发工程师",
+            "base_location": "广州",
+            "current_status": "笔试中",
+            "interview_time": None,
+        }])
+        self.assertFalse(panel.candidate_review.isHidden())
+        self.assertEqual(panel.candidate_table.rowCount(), 1)
+        self.assertFalse(panel.candidate_create_button.isEnabled())
+        panel.candidate_table.item(0, 0).setCheckState(Qt.CheckState.Checked)
+        self.assertTrue(panel.candidate_create_button.isEnabled())
+        panel.candidate_create_button.click()
+        self.wait_until(lambda: not panel.is_busy)
+        self.assertEqual(len(api._interviews), before + 1)
+        self.assertTrue(panel.candidate_review.isHidden())
+        panel.close()
+
     def test_summary_can_be_filtered_from_keyboard(self):
         page = DashboardPage(MockApiClient())
         page.show()
@@ -148,6 +173,20 @@ class AgentPanelTest(unittest.TestCase):
         self.assertTrue(window.agent_panel.isVisible())
         window.close()
 
+    def test_mock_interview_resume_button_uses_attachment_icon(self):
+        window = MainWindow(MockApiClient())
+        button = window.mock_page.resume_button
+        self.assertEqual(button.accessibleName(), "上传简历")
+        self.assertFalse(button.icon().isNull())
+        window.mock_page._resume_uploaded({
+            "id": "resume-" + "a" * 32,
+            "file_name": "后端开发简历.pdf",
+            "character_count": 2048,
+        })
+        self.assertEqual(window.mock_page.resume_id, "resume-" + "a" * 32)
+        self.assertEqual(window.mock_page.resume_name.text(), "后端开发简历.pdf")
+        window.close()
+
     def test_dashboard_uses_scrollable_status_and_start_end_time_editors(self):
         """投递页按开始时间降序展示，并用时间选择器编辑起止时间。"""
         page = DashboardPage(MockApiClient())
@@ -159,6 +198,23 @@ class AgentPanelTest(unittest.TestCase):
         self.assertIsInstance(page.table.cellWidget(0, page.END_TIME_COLUMN), DateTimePicker)
         self.assertEqual(page.filter_combo.maxVisibleItems(), 6)
         self.assertEqual(page.table.cellWidget(0, page.STATUS_COLUMN).maxVisibleItems(), 6)
+        page.close()
+
+    def test_combo_wheel_does_not_change_status_or_filter(self):
+        """下拉框收起时，滚轮不能改变筛选条件或表格中的当前状态。"""
+        page = DashboardPage(MockApiClient())
+        for combo in (
+            page.filter_combo,
+            page.table.cellWidget(0, page.STATUS_COLUMN),
+        ):
+            before = combo.currentIndex()
+            wheel_event = QWheelEvent(
+                QPointF(8, 8), QPointF(8, 8), QPoint(), QPoint(0, 120),
+                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                Qt.ScrollPhase.ScrollUpdate, False,
+            )
+            QApplication.sendEvent(combo, wheel_event)
+            self.assertEqual(combo.currentIndex(), before)
         page.close()
 
     def test_datetime_wheel_does_not_change_value(self):
@@ -233,6 +289,30 @@ class AgentPanelTest(unittest.TestCase):
         self.assertIn("font-weight:700", html)
         self.assertIn("<ul", html)
         self.assertNotIn("<script>", html)
+
+    def test_agent_markdown_table_becomes_narrow_record_cards(self):
+        """模型偶尔返回 Markdown 表格时，窄侧栏应展示纵向业务卡片。"""
+        html = _markdown_fragment(
+            "### 待面试记录\n"
+            "| ID | 公司 | 岗位 | Base | 面试时间 | 状态 |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 7 | 快手 | 基础平台研发工程师 | 北京 | 2026-10-12 15:00 | 待面试 |\n"
+            "| 9 | 去哪儿 | AI应用开发工程师 | 北京 | 无时间 | 待确认 |"
+        )
+        self.assertNotIn("|---", html)
+        self.assertNotIn("| ID |", html)
+        self.assertIn("待面试记录", html)
+        self.assertIn("快手", html)
+        self.assertIn("基础平台研发工程师", html)
+        self.assertIn("2026-10-12 15:00", html)
+        self.assertIn("记录 #7", html)
+        self.assertIn("background-color:#FAF8FD", html)
+
+    def test_non_table_pipe_text_is_not_converted_to_record_card(self):
+        """只有带分隔行的完整表格才转换，避免误伤普通正文。"""
+        html = _markdown_fragment("状态 A | 状态 B | 状态 C")
+        self.assertNotIn("background-color:#FAF8FD", html)
+        self.assertIn("状态 A | 状态 B | 状态 C", html)
 
     def test_window_close_cancels_request_before_destroying_thread(self):
         window = MainWindow(DelayedApi(30))

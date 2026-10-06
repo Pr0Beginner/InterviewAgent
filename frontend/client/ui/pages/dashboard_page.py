@@ -56,6 +56,7 @@ class SummaryCard(QFrame):
 
 class DashboardPage(QWidget):
     event_message = Signal(str)
+    email_candidates = Signal(list)
 
     STATUS_OPTIONS = ["已投递", "简历筛选中", "笔试中", "待面试", "一面", "二面", "三面", "HR面", "Offer", "已结束"]
     SUMMARY_CARDS = [
@@ -586,8 +587,11 @@ class DashboardPage(QWidget):
         self._poll_timer.stop()
         self._email_task_id = None
         data = result["result"]
+        candidates = data.get("creation_candidates", [])
         self.integration_notice.setText(result.get("error") or
-            f"邮件扫描完成：更新 {data.get('updated', 0)} 条，需核对 {len(data.get('needs_review', []))} 封，失败 {data.get('failed', 0)} 封。")
+            f"邮件扫描完成：更新 {data.get('updated', 0)} 条，待创建 {len(candidates)} 条，需核对 {len(data.get('needs_review', []))} 封，失败 {data.get('failed', 0)} 封。")
+        if candidates:
+            self.email_candidates.emit(candidates)
         if not self.has_pending_changes:
             self.refresh()
 
@@ -669,7 +673,7 @@ def _apply_status_tone(widget: QWidget, status: str) -> None:
 
 
 def _configure_status_combo(combo: QComboBox) -> None:
-    """限制状态弹层高度，并允许通过滚轮或滚动条浏览全部状态。"""
+    """限制状态弹层高度；弹层内仍可通过滚轮或滚动条浏览全部状态。"""
     combo.setMaxVisibleItems(6)
     combo.setProperty("statusSelector", True)
     combo.view().setMaximumHeight(256)

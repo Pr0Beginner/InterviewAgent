@@ -1,7 +1,7 @@
 """Shared pearl dropdowns, retaining Qt's selection and keyboard behavior."""
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainterPath, QPen, QRegion
+from PySide6.QtGui import QColor, QLinearGradient, QPainterPath, QPen, QRegion, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QListView, QStyle, QStyledItemDelegate,
 )
@@ -79,6 +79,10 @@ class GlassComboBox(QComboBox):
         if isinstance(popup, QFrame):
             popup.setFrameShape(QFrame.Shape.NoFrame)
         popup.layout().setContentsMargins(1, 1, 1, 1)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        """未展开时把滚轮事件交给父容器，避免意外改变当前选项。"""
+        event.ignore()
 
     def showPopup(self) -> None:
         if not self.count():

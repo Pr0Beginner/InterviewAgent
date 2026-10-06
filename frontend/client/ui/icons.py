@@ -54,6 +54,14 @@ def app_icon(kind: str, color: str = "#8B819B", active: str = "#9273D5") -> QIco
                 path.lineTo(x, y)
             path.closeSubpath()
             painter.drawPath(path)
+        elif kind == "paperclip":
+            path = QPainterPath(QPointF(8, 13))
+            path.lineTo(15, 6)
+            path.cubicTo(17, 4, 20, 7, 18, 9)
+            path.lineTo(10, 17)
+            path.cubicTo(7, 20, 3, 16, 6, 13)
+            path.lineTo(14, 5)
+            painter.drawPath(path)
         else:
             painter.drawRoundedRect(3, 4, 18, 14, 3, 3)
             painter.drawLine(7, 9, 17, 9)

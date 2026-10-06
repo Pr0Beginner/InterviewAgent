@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 from collections.abc import AsyncIterator
+from pathlib import Path
 from time import time
 from typing import Any
 from uuid import uuid4
@@ -35,6 +36,7 @@ class MockApiClient(ApiClient):
         self._interviews = deepcopy(INTERVIEWS)
         self._jobs = deepcopy(JOB_RECOMMENDATIONS)
         self._mock_sessions: dict[str, dict[str, Any]] = {}
+        self._mock_resumes: dict[str, dict[str, Any]] = {}
 
     def create_chat_completion(
         self,
@@ -196,10 +198,35 @@ class MockApiClient(ApiClient):
         return {"task_id": task_id, "status": "accepted", "created_at": _now(),
                 "limit": limit, "scope": scope}
 
+    def create_email_candidates(self, candidate_ids: list[str]) -> dict[str, Any]:
+        """为前端审核交互测试创建内存投递记录。"""
+        created = []
+        for candidate_id in candidate_ids:
+            record = {
+                "id": max((item["id"] for item in self._interviews), default=0) + 1,
+                "company_name": "邮件候选公司",
+                "position_name": "待确认岗位",
+                "base_location": "待确认",
+                "current_status": "笔试中",
+                "interview_time": None,
+                "interview_end_time": None,
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            self._interviews.append(record)
+            created.append({
+                "id": candidate_id,
+                "application_id": record["id"],
+                "company_name": record["company_name"],
+                "position_name": record["position_name"],
+            })
+        return {"created": created, "already_created": [], "failed": []}
+
     def recommend_jobs(
         self,
         cities: list[str],
-        tech_stack: list[str],
+        work_experience: str = "应届生",
+        tech_stack: list[str] | None = None,
         business_preferences: list[str] | None = None,
         keywords: list[str] | None = None,
         page: int = 1,
@@ -211,6 +238,11 @@ class MockApiClient(ApiClient):
         jobs = self._jobs
         if cities:
             jobs = [job for job in jobs if job["base_location"] in cities]
+        if work_experience != "不限":
+            jobs = [
+                job for job in jobs
+                if job.get("work_experience", "应届生") == work_experience
+            ]
         if keywords:
             normalized = [keyword.lower() for keyword in keywords]
             jobs = [
@@ -240,12 +272,31 @@ class MockApiClient(ApiClient):
             raise KeyError(f"Job recommendation {recommendation_id} not found")
         return deepcopy(job)
 
+    def upload_resume(self, file_path: str) -> dict[str, Any]:
+        path = Path(file_path)
+        if path.suffix.lower() not in {".pdf", ".docx"}:
+            raise ValueError("仅支持 PDF 或 DOCX 格式的简历。")
+        data = path.read_bytes()
+        if not data:
+            raise ValueError("简历文件为空。")
+        resume_id = "resume-" + uuid4().hex
+        result = {
+            "id": resume_id,
+            "file_name": path.name,
+            "format": path.suffix.lower().removeprefix("."),
+            "character_count": max(20, len(data)),
+            "created_at": _now(),
+        }
+        self._mock_resumes[resume_id] = result
+        return deepcopy(result)
+
     def create_mock_interview(
         self,
         company_name: str | None,
         position_name: str,
         interview_round: str,
         interview_focus: list[str] | None = None,
+        resume_id: str | None = None,
         extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         session_id = f"mock-{uuid4().hex[:8]}"
@@ -254,13 +305,18 @@ class MockApiClient(ApiClient):
             "position_name": position_name,
             "interview_round": interview_round,
             "interview_focus": interview_focus or [],
+            "resume_id": resume_id,
             "question_index": 0,
             "answers": [],
         }
+        question = (
+            "请结合简历中最有代表性的项目，说明你负责的部分、核心技术栈和最关键的技术取舍。"
+            if resume_id else MOCK_INTERVIEW_QUESTIONS[0]
+        )
         return {
             "session_id": session_id,
             "question_id": "q-1",
-            "question": MOCK_INTERVIEW_QUESTIONS[0],
+            "question": question,
             "status": "in_progress",
             "created_at": _now(),
         }

@@ -22,3 +22,4 @@ backend/.env
 backend/data/boss-profile/
 backend/data/*.json
 backend/data/interviews.md
+backend/data/resumes/

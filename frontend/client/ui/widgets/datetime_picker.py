@@ -15,13 +15,6 @@ from PySide6.QtWidgets import (
 from client.ui.widgets.glass_combo import GlassComboBox
 
 
-class NoWheelComboBox(GlassComboBox):
-    """仅通过点击和键盘选择，不响应滚轮改值。"""
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        event.ignore()
-
-
 class DateTimePickerDialog(QDialog):
     """同时提供日历、小时和分钟的完整日期时间选择弹窗。"""
 
@@ -80,11 +73,11 @@ class DateTimePickerDialog(QDialog):
         time_row.setSpacing(10)
         time_label = QLabel("具体时间")
         time_label.setObjectName("PickerFieldLabel")
-        self.hour_combo = NoWheelComboBox()
+        self.hour_combo = GlassComboBox()
         self.hour_combo.setObjectName("TimePartCombo")
         self.hour_combo.addItems([f"{hour:02d} 时" for hour in range(24)])
         self.hour_combo.setCurrentIndex(initial.time().hour())
-        self.minute_combo = NoWheelComboBox()
+        self.minute_combo = GlassComboBox()
         self.minute_combo.setObjectName("TimePartCombo")
         self.minute_combo.addItems([f"{minute:02d} 分" for minute in range(60)])
         self.minute_combo.setCurrentIndex(initial.time().minute())

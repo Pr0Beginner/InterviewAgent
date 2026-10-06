@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 from backend.app.models.enums import InterviewStatus
 from backend.app.schemas.common import ExtensibleRequest
@@ -51,9 +51,31 @@ class EmailSyncRequest(ExtensibleRequest):
     )
 
 
+class EmailCandidateCreateRequest(ExtensibleRequest):
+    candidate_ids: list[str] = Field(
+        min_length=1,
+        max_length=100,
+        description="用户在前端明确勾选的邮件候选记录 ID",
+    )
+
+    @field_validator("candidate_ids")
+    @classmethod
+    def validate_candidate_ids(cls, values: list[str]) -> list[str]:
+        """候选 ID 只能来自服务端生成的固定前缀标识。"""
+        if any(
+            not value.startswith("mail-candidate-") or len(value) > 80
+            for value in values
+        ):
+            raise ValueError("邮件候选记录 ID 不合法")
+        return list(dict.fromkeys(values))
+
+
 class JobSearchRequest(ExtensibleRequest):
     cities: list[str] = Field(default_factory=list, max_length=10, description="目标城市；空列表表示不限制")
-    tech_stack: list[str] = Field(min_length=1, max_length=30, description="用于匹配 JD 的技术栈")
+    work_experience: Literal[
+        "不限", "应届生", "1年以内", "1-3年", "3-5年", "5-10年", "10年以上"
+    ] = Field(default="应届生", description="目标岗位要求的工作经验")
+    tech_stack: list[str] = Field(default_factory=list, max_length=30, description="可选技术栈；推荐页面不要求填写")
     business_preferences: list[str] = Field(default_factory=list, max_length=20, description="偏好的业务方向")
     keywords: list[str] = Field(default_factory=list, max_length=20, description="岗位搜索词；省略则使用技术栈")
     page: int = Field(default=1, ge=1, description="页码，从 1 开始")
@@ -65,6 +87,11 @@ class MockInterviewRequest(ExtensibleRequest):
     position_name: str = Field(min_length=1, max_length=255, description="目标岗位")
     interview_round: str = Field(min_length=1, max_length=100, description="目标面试轮次")
     interview_focus: list[str] = Field(default_factory=list, max_length=20, description="希望考察的知识方向")
+    resume_id: str | None = Field(
+        default=None,
+        pattern=r"^resume-[a-f0-9]{32}$",
+        description="已上传并完成解析的本地简历 ID",
+    )
 
 
 class MockAnswerRequest(ExtensibleRequest):
@@ -95,6 +122,7 @@ class EmailEvent(BaseModel):
     relevant: bool
     company_name: str | None = None
     position_name: str | None = None
+    base_location: str | None = None
     status: InterviewStatus | None = None
     interview_time: datetime | None = None
     confidence: float = Field(ge=0, le=1)
@@ -109,3 +137,22 @@ class JobAssessment(BaseModel):
     match_reasons: list[str]
     risk_points: list[str]
     jd_summary: str = Field(max_length=2000)
+
+
+class IndexedJobAssessment(JobAssessment):
+    source_index: int = Field(ge=0, description="对应输入 sources 中的 source_index")
+
+
+class JobAssessmentBatch(BaseModel):
+    items: list[IndexedJobAssessment] = Field(min_length=1, max_length=30)
+
+    @field_validator("items")
+    @classmethod
+    def validate_unique_source_indexes(
+        cls, items: list[IndexedJobAssessment]
+    ) -> list[IndexedJobAssessment]:
+        """批量结果必须能无歧义地映射回原始岗位。"""
+        indexes = [item.source_index for item in items]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("source_index 不能重复")
+        return items

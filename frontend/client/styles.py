@@ -155,8 +155,83 @@ QFrame#Composer[focused="true"] { border-color: #987BD6; }
 QPlainTextEdit#AgentInput { background: transparent; border: none; border-radius: 0; padding: 2px; }
 QLabel#InputHint { color: #746B81; font-size: 10px; }
 QPushButton#AgentSendButton { min-width: 40px; border-radius: 7px; padding: 6px 12px; }
+QFrame#EmailCandidateReview {
+    background: rgba(255,255,255,210); border: 1px solid #DCCFED;
+    border-radius: 14px;
+}
+QLabel#EmailCandidateTitle { color: #55476B; font-size: 13px; font-weight: 600; }
+QLabel#EmailCandidateCount {
+    color: #8061BE; background: #EEE7F9; border-radius: 7px;
+    padding: 3px 7px; font-size: 10px;
+}
+QLabel#EmailCandidateHint, QLabel#EmailCandidateFeedback { color: #766C82; font-size: 10px; }
+QTableWidget#EmailCandidateTable {
+    background: transparent; border: 1px solid #E7DDF2; border-radius: 8px;
+    alternate-background-color: #FAF8FD; font-size: 10px;
+}
+QTableWidget#EmailCandidateTable::item { padding: 5px; }
+QTableWidget#EmailCandidateTable QHeaderView::section {
+    background: #F3EEF9; color: #695B7A; border: none;
+    border-bottom: 1px solid #E1D5EF; padding: 6px; font-size: 10px; font-weight: 600;
+}
 QFrame#Card, QFrame#InterviewSettings { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(255,255,255,230),stop:1 rgba(249,244,255,135)); border: 1px solid rgba(255,255,255,235); border-radius: 18px; }
 QFrame#InterviewSettings { background: rgba(255,255,255,150); }
+QFrame#JobSearchToolbar {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(255,255,255,210),stop:1 rgba(241,235,249,145));
+    border: 1px solid rgba(255,255,255,235); border-radius: 15px;
+}
+QLabel#JobFilterLabel { color: #6F647A; font-size: 11px; font-weight: 600; }
+QPushButton#CityPicker {
+    color: #4E4359; background: rgba(255,255,255,205); border: 1px solid #DED3EA;
+    border-radius: 9px; padding: 7px 30px 7px 11px; text-align: left;
+}
+QPushButton#CityPicker:hover, QPushButton#CityPicker:focus { color: #7555B1; border-color: #BDA8DD; background: #FBF9FE; }
+QPushButton#CityPicker::menu-indicator {
+    image: url(__ASSETS__/chevron-down.svg); subcontrol-origin: padding; subcontrol-position: center right;
+    width: 11px; height: 11px; right: 10px;
+}
+QMenu#CityPickerMenu {
+    color: #554B63; background: #FAF7FD; border: 1px solid #DED3EA;
+    border-radius: 10px; padding: 7px;
+}
+QCheckBox#CityOption { color: #554B63; spacing: 9px; padding: 7px 9px; }
+QCheckBox#CityOption:hover { color: #7555B1; background: #F1EAFB; border-radius: 7px; }
+QCheckBox#CityOption::indicator { width: 15px; height: 15px; border: 1px solid #BFAFD1; border-radius: 4px; background: #FFFFFF; }
+QCheckBox#CityOption::indicator:checked { background: #9273D5; border-color: #9273D5; }
+QLabel#JobNotice { color: #6E637A; background: rgba(248,245,252,125); border-radius: 8px; padding: 7px 10px; font-size: 11px; }
+QFrame#JobResultRow {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(255,255,255,235),stop:1 rgba(248,244,253,180));
+    border: 1px solid rgba(222,211,234,205); border-radius: 14px;
+}
+QFrame#JobResultRow:hover { border-color: #CDBBE4; background: rgba(255,255,255,242); }
+QLabel#JobSequence {
+    color: #7253AE; background: #EEE7F8; border: 1px solid #DED0F0;
+    border-radius: 11px; font-size: 15px; font-weight: 700;
+}
+QLabel#JobFieldLabel { color: #978CA2; font-size: 10px; padding-top: 2px; }
+QLabel#JobPrimaryValue { color: #332D3A; font-size: 15px; font-weight: 600; }
+QLabel#JobFieldValue { color: #5D5368; font-size: 12px; }
+QLabel#JobSalary { color: #9B5D38; font-size: 13px; font-weight: 600; }
+QFrame#JobActions {
+    background: transparent; border: none; border-left: 1px solid rgba(222,211,234,175);
+}
+QLabel#JobLink { color: #7555B1; font-size: 12px; }
+QLabel#JobLink a { color: #7555B1; text-decoration: none; }
+QFrame#JdHoverArea { background: transparent; border: none; }
+QLabel#JdTrigger { color: #7555B1; font-size: 12px; font-weight: 600; padding: 4px 0; }
+QFrame#JdPreview { background: #F7F3FB; border: 1px solid #D8C9E9; border-radius: 10px; }
+QLabel#JdText { color: #554B63; font-size: 12px; }
+QLabel#JobEmptyState { color: #82778D; background: rgba(255,255,255,120); border: 1px dashed #D8CDE2; border-radius: 12px; padding: 36px; }
+QPushButton#ResumeUploadButton {
+    min-width: 38px; max-width: 38px; min-height: 38px; max-height: 38px;
+    padding: 0; background: rgba(255,255,255,115); border: 1px solid #DED5E8;
+    border-radius: 9px;
+}
+QPushButton#ResumeUploadButton:hover { background: #F5F0FB; border-color: #BCA7D9; }
+QPushButton#ResumeUploadButton:focus { background: #F5F0FB; border: 2px solid #987BD6; }
+QPushButton#ResumeUploadButton:pressed { background: #EDE5F6; }
+QPushButton#ResumeUploadButton:disabled { background: #F0F0F2; border-color: #E4DFE8; }
+QLabel#ResumeFileName { color: #655D71; font-size: 11px; }
 QLabel#ScoreBadge { color: #57866E; background: #ECF4EE; border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
 QLabel#ReasonBox { color: #356046; background: #F2F7F3; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
 QLabel#RiskBox { color: #8A651C; background: #FCF7EB; border-radius: 8px; padding: 10px 12px; font-size: 12px; }

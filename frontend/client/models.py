@@ -28,6 +28,7 @@ class JobRecommendation:
     position_name: str
     base_location: str
     match_score: int
+    salary: str = "待确认"
     match_reasons: list[str] = field(default_factory=list)
     risk_points: list[str] = field(default_factory=list)
     jd_summary: str = ""

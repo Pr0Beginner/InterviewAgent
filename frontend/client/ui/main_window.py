@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
         self.jobs_page = JobsPage(self.api)
         self.mock_page = MockInterviewPage(self.api)
         self.dashboard.event_message.connect(self.agent_panel.add_system_message)
+        self.dashboard.email_candidates.connect(self.agent_panel.show_email_candidates)
         self.jobs_page.event_message.connect(self.agent_panel.add_system_message)
         for page in (self.dashboard, self.jobs_page, self.mock_page):
             self.pages.addWidget(page)

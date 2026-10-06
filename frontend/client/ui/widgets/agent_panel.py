@@ -10,17 +10,22 @@ from uuid import uuid4
 from PySide6.QtCore import QEvent, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QKeyEvent, QTextDocumentFragment
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QTextBrowser,
     QVBoxLayout,
 )
 
 from client.api.base import ApiClient
 from client.ui.icons import app_icon
+from client.ui.widgets.api_task import TaskRunner
 from client.ui.widgets.glass import soft_shadow
 
 
@@ -126,6 +131,7 @@ class AgentPanel(QFrame):
         self._pending_page = "applications"
         self._pending_message = ""
         self._finish_reason = None
+        self._email_candidates: dict[str, dict] = {}
         self.page_context = "applications"
         self.setObjectName("AgentPanel")
         self.setMinimumWidth(320)
@@ -153,6 +159,59 @@ class AgentPanel(QFrame):
         self.messages = QTextBrowser()
         self.messages.setObjectName("AgentMessages")
         self.messages.setOpenExternalLinks(True)
+
+        self.candidate_runner = TaskRunner(api, self)
+        self.candidate_runner.failed.connect(self._candidate_failed)
+        self.candidate_runner.idle.connect(self._candidate_idle)
+
+        self.candidate_review = QFrame()
+        self.candidate_review.setObjectName("EmailCandidateReview")
+        review_layout = QVBoxLayout(self.candidate_review)
+        review_layout.setContentsMargins(14, 12, 14, 12)
+        review_layout.setSpacing(8)
+        review_heading = QHBoxLayout()
+        review_title = QLabel("待创建投递")
+        review_title.setObjectName("EmailCandidateTitle")
+        self.candidate_count = QLabel()
+        self.candidate_count.setObjectName("EmailCandidateCount")
+        review_heading.addWidget(review_title)
+        review_heading.addStretch()
+        review_heading.addWidget(self.candidate_count)
+        review_layout.addLayout(review_heading)
+        review_hint = QLabel("邮件中已识别到招聘事项，但本地没有对应记录。勾选确认后再创建。")
+        review_hint.setObjectName("EmailCandidateHint")
+        review_hint.setWordWrap(True)
+        review_layout.addWidget(review_hint)
+
+        self.candidate_table = QTableWidget(0, 6)
+        self.candidate_table.setObjectName("EmailCandidateTable")
+        self.candidate_table.setHorizontalHeaderLabels(
+            ["选择", "公司", "岗位", "Base", "状态", "时间"]
+        )
+        self.candidate_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.candidate_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.candidate_table.verticalHeader().setVisible(False)
+        self.candidate_table.verticalHeader().setDefaultSectionSize(38)
+        self.candidate_table.setShowGrid(False)
+        header = self.candidate_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.candidate_table.setColumnWidth(0, 46)
+        self.candidate_table.itemChanged.connect(self._candidate_selection_changed)
+        review_layout.addWidget(self.candidate_table)
+
+        review_actions = QHBoxLayout()
+        self.candidate_feedback = QLabel("")
+        self.candidate_feedback.setObjectName("EmailCandidateFeedback")
+        self.candidate_feedback.setWordWrap(True)
+        self.candidate_create_button = QPushButton("创建选中记录")
+        self.candidate_create_button.setObjectName("PrimaryButton")
+        self.candidate_create_button.setEnabled(False)
+        self.candidate_create_button.clicked.connect(self._create_selected_candidates)
+        review_actions.addWidget(self.candidate_feedback, 1)
+        review_actions.addWidget(self.candidate_create_button)
+        review_layout.addLayout(review_actions)
+        self.candidate_review.hide()
 
         self.welcome = QFrame()
         welcome_layout = QVBoxLayout(self.welcome)
@@ -218,6 +277,7 @@ class AgentPanel(QFrame):
         layout.addWidget(self.subtitle)
         layout.addWidget(self.welcome, 1)
         layout.addWidget(self.messages, 1)
+        layout.addWidget(self.candidate_review)
         layout.addWidget(self.composer)
         self._render_messages()
         self.set_page_context(self.page_context)
@@ -263,7 +323,7 @@ class AgentPanel(QFrame):
     @property
     def is_busy(self) -> bool:
         """判断请求是否仍占用工作线程及其 HTTP 连接。"""
-        return self._worker is not None
+        return self._worker is not None or self.candidate_runner.busy
 
     def cancel(self) -> None:
         """停止当前生成，供停止按钮和窗口关闭流程共用。"""
@@ -271,10 +331,14 @@ class AgentPanel(QFrame):
             self._worker.cancel()
             self.send_button.setText("正在停止…")
             self.send_button.setEnabled(False)
+        if self.candidate_runner.busy:
+            self.candidate_runner.cancel()
 
     def _send_message(self) -> None:
         """记录当前页面，并启动后台流式请求。"""
-        if self.is_busy:
+        if self.candidate_runner.busy:
+            return
+        if self._worker is not None:
             self.cancel()
             return
         message = self.input.toPlainText().strip()
@@ -309,6 +373,9 @@ class AgentPanel(QFrame):
 
     def _on_chunk(self, chunk: dict) -> None:
         """仅追加助手回复文本，不将模型推理内容显示到界面。"""
+        candidates = chunk.get("app_data", {}).get("email_creation_candidates", [])
+        if candidates:
+            self.show_email_candidates(candidates)
         for choice in chunk.get("choices", []):
             self._reply += choice.get("delta", {}).get("content") or ""
             self._finish_reason = choice.get("finish_reason") or self._finish_reason
@@ -346,7 +413,126 @@ class AgentPanel(QFrame):
         self.send_button.setEnabled(True)
         self.send_button.setText("发送")
         self.status_label.setText("● 就绪")
-        self.idle.emit()
+        if not self.candidate_runner.busy:
+            self.idle.emit()
+
+    def show_email_candidates(self, candidates: list[dict]) -> None:
+        """显示服务端保存的待创建邮件候选项，不信任前端自行构造业务字段。"""
+        for candidate in candidates:
+            candidate_id = candidate.get("id")
+            if candidate_id:
+                self._email_candidates[candidate_id] = dict(candidate)
+        if not self._email_candidates:
+            return
+        if len(self._transcript) == 1:
+            self._transcript.append({
+                "kind": "agent",
+                "content": "邮件中发现本地尚未记录的招聘事项，请在下表确认是否创建。",
+                "label": "系统",
+            })
+            self._render_messages()
+        self._render_candidate_table()
+
+    def _render_candidate_table(self) -> None:
+        """根据待确认候选项重建审核表，默认不替用户勾选。"""
+        rows = list(self._email_candidates.values())
+        self.candidate_table.blockSignals(True)
+        self.candidate_table.setRowCount(len(rows))
+        for row, candidate in enumerate(rows):
+            selector = QTableWidgetItem("")
+            selector.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            selector.setCheckState(Qt.CheckState.Unchecked)
+            selector.setData(Qt.ItemDataRole.UserRole, candidate["id"])
+            self.candidate_table.setItem(row, 0, selector)
+            values = (
+                candidate.get("company_name") or "待确认",
+                candidate.get("position_name") or "待确认",
+                candidate.get("base_location") or "待确认",
+                candidate.get("current_status") or "待确认",
+                _display_datetime(candidate.get("interview_time")),
+            )
+            for column, value in enumerate(values, 1):
+                item = QTableWidgetItem(value)
+                item.setToolTip(
+                    candidate.get("source_subject") or value
+                    if column in {1, 2}
+                    else value
+                )
+                self.candidate_table.setItem(row, column, item)
+        self.candidate_table.blockSignals(False)
+        visible_rows = min(max(len(rows), 1), 5)
+        self.candidate_table.setFixedHeight(31 + visible_rows * 38 + 4)
+        self.candidate_count.setText(f"{len(rows)} 条")
+        self.candidate_feedback.clear()
+        self.candidate_review.show()
+        self._candidate_selection_changed()
+
+    def _selected_candidate_ids(self) -> list[str]:
+        return [
+            self.candidate_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.candidate_table.rowCount())
+            if self.candidate_table.item(row, 0).checkState() == Qt.CheckState.Checked
+        ]
+
+    def _candidate_selection_changed(self, _item=None) -> None:
+        count = len(self._selected_candidate_ids())
+        self.candidate_create_button.setEnabled(count > 0 and not self.candidate_runner.busy)
+        self.candidate_create_button.setText(
+            f"创建选中记录（{count}）" if count else "创建选中记录"
+        )
+
+    def _create_selected_candidates(self) -> None:
+        candidate_ids = self._selected_candidate_ids()
+        if not candidate_ids or self.is_busy:
+            return
+        self.candidate_feedback.setText("正在创建…")
+        self.candidate_create_button.setEnabled(False)
+        self.send_button.setEnabled(False)
+        self.status_label.setText("● 保存中")
+        self.candidate_runner.start(
+            "create_email_candidates",
+            self._candidate_created,
+            candidate_ids=candidate_ids,
+        )
+
+    def _candidate_created(self, result: dict) -> None:
+        resolved = {
+            item["id"]
+            for key in ("created", "already_created")
+            for item in result.get(key, [])
+        }
+        for candidate_id in resolved:
+            self._email_candidates.pop(candidate_id, None)
+        failures = result.get("failed", [])
+        created_count = len(result.get("created", []))
+        existing_count = len(result.get("already_created", []))
+        parts = []
+        if created_count:
+            parts.append(f"已创建 {created_count} 条投递记录")
+        if existing_count:
+            parts.append(f"已有 {existing_count} 条记录")
+        if failures:
+            parts.append(f"{len(failures)} 条创建失败")
+        message = "，".join(parts) + "。"
+        self.add_system_message(message)
+        if self._email_candidates:
+            self._render_candidate_table()
+            self.candidate_feedback.setText(
+                failures[0].get("reason", "部分记录创建失败，请检查。")
+                if failures else ""
+            )
+        else:
+            self.candidate_review.hide()
+
+    def _candidate_failed(self, message: str) -> None:
+        self.candidate_feedback.setText(message)
+
+    def _candidate_idle(self) -> None:
+        self.send_button.setEnabled(True)
+        self.status_label.setText("● 就绪")
+        self._candidate_selection_changed()
+        if self._worker is None:
+            self.idle.emit()
 
     def _render_messages(self) -> None:
         """以 Markdown 渲染可见对话，不与各页面发送给模型的历史混用。"""
@@ -400,9 +586,161 @@ def _markdown_fragment(content: str) -> str:
     返回值:
         已转义原始 HTML、保留 Markdown 格式的正文 HTML。
     """
+    fragments: list[str] = []
+    for kind, payload in _split_markdown_tables(content):
+        if kind == "table":
+            headers, rows = payload
+            fragments.append(_record_cards(headers, rows))
+        elif payload:
+            fragments.append(_qt_markdown_fragment(payload))
+    return "".join(fragments)
+
+
+def _qt_markdown_fragment(content: str) -> str:
+    """使用 Qt 渲染普通 Markdown；表格由上层转换成适合窄栏的卡片。"""
     safe_markdown = escape(content, quote=False)
     document_html = QTextDocumentFragment.fromMarkdown(safe_markdown).toHtml()
     body = re.search(r"<body[^>]*>(.*)</body>", document_html, re.S)
     if body is None:
         return escape(content).replace("\n", "<br>")
     return body.group(1).replace("<!--StartFragment-->", "").replace("<!--EndFragment-->", "")
+
+
+def _split_markdown_tables(content: str) -> list[tuple[str, object]]:
+    """切分正文中的标准 Markdown 表格，避免 Qt 不支持时显示竖线原文。"""
+    lines = content.splitlines()
+    result: list[tuple[str, object]] = []
+    text_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        headers = _markdown_table_cells(lines[index])
+        divider = (
+            _markdown_table_cells(lines[index + 1])
+            if index + 1 < len(lines) else None
+        )
+        if not (
+            headers and divider and len(headers) == len(divider)
+            and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in divider)
+        ):
+            text_lines.append(lines[index])
+            index += 1
+            continue
+
+        rows: list[list[str]] = []
+        cursor = index + 2
+        while cursor < len(lines):
+            cells = _markdown_table_cells(lines[cursor])
+            if cells is None:
+                break
+            rows.append((cells + [""] * len(headers))[:len(headers)])
+            cursor += 1
+        if not rows:
+            text_lines.extend(lines[index:index + 2])
+            index += 2
+            continue
+
+        if text_lines:
+            result.append(("text", "\n".join(text_lines)))
+            text_lines = []
+        result.append(("table", (headers, rows)))
+        index = cursor
+
+    if text_lines:
+        result.append(("text", "\n".join(text_lines)))
+    return result
+
+
+def _markdown_table_cells(line: str) -> list[str] | None:
+    """解析一行简单 Markdown 表格，不把普通正文中的单个竖线视为表格。"""
+    stripped = line.strip()
+    if stripped.count("|") < 2:
+        return None
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    cells = [cell.strip() for cell in stripped.split("|")]
+    return cells if len(cells) >= 2 else None
+
+
+def _record_cards(headers: list[str], rows: list[list[str]]) -> str:
+    """将横向业务表格转换为适合 Agent 窄侧栏的纵向记录卡片。"""
+    company_index = _header_index(headers, {"公司", "企业", "单位", "company"})
+    position_index = _header_index(headers, {"岗位", "职位", "应聘岗位", "role", "position"})
+    status_index = _header_index(headers, {"状态", "当前状态", "进度", "status"})
+    id_index = _header_index(headers, {"id", "编号", "序号"})
+    cards: list[str] = ["<div style='margin:7px 0 11px 0;'>"]
+
+    for row in rows:
+        fallback_indexes = [
+            index for index, value in enumerate(row)
+            if value and index not in {id_index, status_index}
+        ]
+        title_index = company_index if company_index is not None else (
+            fallback_indexes[0] if fallback_indexes else None
+        )
+        title = row[title_index] if title_index is not None else "未命名记录"
+        subtitle = row[position_index] if position_index is not None else ""
+        status = row[status_index] if status_index is not None else ""
+        record_id = row[id_index] if id_index is not None else ""
+        excluded = {title_index, position_index, status_index, id_index}
+        details = [
+            (header, row[index])
+            for index, header in enumerate(headers)
+            if index not in excluded and row[index]
+        ]
+
+        cards.append(
+            "<table width='100%' cellspacing='0' cellpadding='0' "
+            "style='margin:7px 0;background-color:#FAF8FD;border:1px solid #E2D8ED;'>"
+            "<tr><td style='padding:10px 11px 8px 11px;'>"
+            "<table width='100%' cellspacing='0' cellpadding='0'><tr>"
+            "<td valign='top'>"
+            f"<span style='color:#242128;font-size:14px;font-weight:700'>{escape(title)}</span>"
+            + (
+                f"<br><span style='color:#625C68;font-size:12px'>{escape(subtitle)}</span>"
+                if subtitle and position_index != title_index else ""
+            )
+            + (
+                f"<br><span style='color:#92889A;font-size:10px'>记录 #{escape(record_id)}</span>"
+                if record_id else ""
+            )
+            + "</td>"
+            + (
+                "<td align='right' valign='top' style='padding-left:8px;'>"
+                f"<span style='color:#7555B3;background-color:#EEE7F9;font-size:11px'>"
+                f"&nbsp;{escape(status)}&nbsp;</span></td>"
+                if status else ""
+            )
+            + "</tr></table>"
+        )
+        if details:
+            cards.append("<table width='100%' cellspacing='0' cellpadding='2' style='margin-top:7px;'>")
+            for label, value in details:
+                cards.append(
+                    "<tr>"
+                    f"<td width='74' valign='top' style='color:#8B8291;font-size:11px'>{escape(label)}</td>"
+                    f"<td valign='top' style='color:#454148;font-size:11px'>{escape(value)}</td>"
+                    "</tr>"
+                )
+            cards.append("</table>")
+        cards.append("</td></tr></table>")
+
+    cards.append("</div>")
+    return "".join(cards)
+
+
+def _header_index(headers: list[str], names: set[str]) -> int | None:
+    """按去空格、忽略英文大小写后的字段名寻找列位置。"""
+    normalized_names = {name.replace(" ", "").lower() for name in names}
+    for index, header in enumerate(headers):
+        if header.replace(" ", "").lower() in normalized_names:
+            return index
+    return None
+
+
+def _display_datetime(value: str | None) -> str:
+    """把服务端 ISO 时间压缩成审核表中的本地可读格式。"""
+    if not value:
+        return "待确认"
+    return value.replace("T", " ", 1)[:16]

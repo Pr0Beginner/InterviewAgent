@@ -141,10 +141,16 @@ class ApiClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def create_email_candidates(self, candidate_ids: list[str]) -> dict[str, Any]:
+        """创建用户在邮件审核表中明确勾选的投递记录。"""
+        raise NotImplementedError
+
+    @abstractmethod
     def recommend_jobs(
         self,
         cities: list[str],
-        tech_stack: list[str],
+        work_experience: str = "应届生",
+        tech_stack: list[str] | None = None,
         business_preferences: list[str] | None = None,
         keywords: list[str] | None = None,
         page: int = 1,
@@ -155,7 +161,8 @@ class ApiClient(ABC):
         
         参数:
             cities: 可接受的工作城市。
-            tech_stack: 求职者的技术栈关键词。
+            work_experience: 目标岗位要求的工作经验，默认应届生。
+            tech_stack: 可选技术栈关键词；推荐页面默认不填写。
             business_preferences: 可选的业务领域偏好。
             keywords: 可选的岗位搜索关键词。
             page: 页码，从 1 开始。
@@ -180,12 +187,18 @@ class ApiClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def upload_resume(self, file_path: str) -> dict[str, Any]:
+        """上传 PDF/DOCX 简历并返回服务端生成的简历 ID。"""
+        raise NotImplementedError
+
+    @abstractmethod
     def create_mock_interview(
         self,
         company_name: str | None,
         position_name: str,
         interview_round: str,
         interview_focus: list[str] | None = None,
+        resume_id: str | None = None,
         extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """创建一场文本模拟面试。
@@ -195,6 +208,7 @@ class ApiClient(ABC):
             position_name: 目标岗位。
             interview_round: 目标面试轮次。
             interview_focus: 可选的重点考察方向。
+            resume_id: 可选的已解析简历 ID。
             extensions: 用于后续兼容的可选请求扩展参数。
         
         返回值:

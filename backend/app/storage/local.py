@@ -252,7 +252,15 @@ class MarkdownInterviewStore:
 class LocalStateStore:
     """保存邮件去重、任务、岗位缓存和模拟面试会话的本地 JSON。"""
 
-    SECTIONS = ("email_receipts", "tasks", "job_searches", "mock_sessions", "operations")
+    SECTIONS = (
+        "email_receipts",
+        "email_candidates",
+        "tasks",
+        "job_searches",
+        "mock_sessions",
+        "resumes",
+        "operations",
+    )
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path or get_settings().local_state_path)

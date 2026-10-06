@@ -48,6 +48,19 @@ class AgentStreamTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ApiRequestError, "DEEPSEEK_API_KEY"):
             _ = [chunk async for chunk in api.stream_chat_completion([{"role": "user", "content": "测试"}])]
 
+    async def test_app_data_chunk_reaches_frontend(self):
+        app_data = {"email_creation_candidates": [{"id": "mail-candidate-test"}]}
+        api = self.api(sse(
+            {"object": "chat.completion.chunk", "choices": [], "app_data": app_data},
+            event("请确认"),
+            event(finish="stop"),
+            "[DONE]",
+        ))
+        chunks = [chunk async for chunk in api.stream_chat_completion([
+            {"role": "user", "content": "扫描邮件"}
+        ])]
+        self.assertEqual(chunks[0]["app_data"], app_data)
+
 
 if __name__ == "__main__":
     unittest.main()

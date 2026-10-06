@@ -14,6 +14,7 @@ from openai import (
 
 from backend.app.agent.errors import AgentError
 from backend.app.core.config import Settings
+from backend.app.observability import get_langfuse
 
 
 class DeepSeekProvider:
@@ -54,8 +55,21 @@ class DeepSeekProvider:
             options["temperature"] = temperature
         if max_tokens is not None:
             options["max_tokens"] = max_tokens
+        completion_options: dict[str, Any] = {}
+        client_class = AsyncOpenAI
+        if get_langfuse(self.settings) is not None:
+            # 官方包装器是 OpenAI SDK 的 drop-in replacement，会自动记录流式
+            # generation、首 token 延迟、用量、成本和异常，并继承当前 Agent trace。
+            from langfuse.openai import AsyncOpenAI as LangfuseAsyncOpenAI
+
+            client_class = LangfuseAsyncOpenAI
+            completion_options.update({
+                "name": "generate-agent-response",
+                "metadata": {"provider": "deepseek", "feature": "agent-chat"},
+                "langfuse_public_key": self.settings.langfuse_public_key,
+            })
         try:
-            async with AsyncOpenAI(
+            async with client_class(
                 api_key=self.settings.deepseek_api_key.get_secret_value(),
                 base_url=self.settings.deepseek_base_url,
                 timeout=self.settings.agent_timeout_seconds,
@@ -68,6 +82,7 @@ class DeepSeekProvider:
                     stream_options={"include_usage": True},
                     extra_body={"thinking": {"type": "disabled"}},
                     **options,
+                    **completion_options,
                 )
                 async with stream:
                     async for chunk in stream:

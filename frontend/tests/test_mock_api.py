@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from client.api.mock_api import MockApiClient
 
@@ -56,10 +58,11 @@ class MockApiClientTest(unittest.TestCase):
 
     def test_job_recommendations(self) -> None:
         result = self.api.recommend_jobs(
-            cities=["上海"], tech_stack=["Java"], keywords=["Java"]
+            cities=["上海"], keywords=["Java"]
         )
         self.assertGreater(result["total"], 0)
         self.assertTrue(all(item["base_location"] == "上海" for item in result["items"]))
+        self.assertTrue(all(item["salary"] for item in result["items"]))
 
     def test_interview_and_job_pagination(self) -> None:
         interviews = self.api.list_interviews(page=2, page_size=5)
@@ -92,6 +95,20 @@ class MockApiClientTest(unittest.TestCase):
         self.assertIn("score", answered)
         summary = self.api.finish_mock_interview(created["session_id"])
         self.assertGreater(summary["overall_score"], 0)
+
+    def test_uploaded_resume_changes_first_mock_question(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            resume = Path(directory) / "resume.docx"
+            resume.write_bytes(b"mock-docx-content")
+            uploaded = self.api.upload_resume(str(resume))
+        created = self.api.create_mock_interview(
+            company_name=None,
+            position_name="Java 后端开发工程师",
+            interview_round="一面",
+            resume_id=uploaded["id"],
+        )
+        self.assertIn("简历", created["question"])
+        self.assertIn("项目", created["question"])
 
 
 if __name__ == "__main__":

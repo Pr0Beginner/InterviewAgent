@@ -180,6 +180,16 @@ class AgentApiTest(unittest.TestCase):
         self.assertIn("等待扫描结束", prompt)
         self.assertIn("不要向用户解释任务 ID", prompt)
 
+    def test_recommendation_prompt_exposes_crawler_cli_and_optional_tech_stack(self):
+        prompt = system_prompt("recommendations")
+        self.assertIn("scripts.crawl_boss_jobs", prompt)
+        self.assertIn("CLI 只返回真实页面事实", prompt)
+        tools = {item["function"]["name"]: item["function"] for item in BUSINESS_TOOLS}
+        required = tools["recommend_jobs"]["parameters"].get("required", [])
+        self.assertNotIn("tech_stack", required)
+        experience = tools["recommend_jobs"]["parameters"]["properties"]["work_experience"]
+        self.assertEqual(experience["default"], "应届生")
+
     def test_email_scan_result_returns_to_conversation_in_same_request(self):
         """扫描完成统计应在同一轮工具循环中交给模型生成最终回复。"""
         provider = FakeProvider([
@@ -206,6 +216,38 @@ class AgentApiTest(unittest.TestCase):
                          "已扫描 40 封已读邮件，更新 2 条投递记录。")
         tool_result = json.loads(provider.requests[1]["messages"][-1]["content"])
         self.assertEqual(tool_result["status"], "completed")
+
+    def test_email_candidates_are_exposed_as_app_data(self):
+        """邮件候选项应同时交给模型和前端确认表，不由模型伪造按钮。"""
+        provider = FakeProvider([
+            [native_chunk({"tool_calls": [{
+                "index": 0, "id": "mail-call", "function": {
+                    "name": "scan_emails", "arguments": '{"limit":30,"scope":"all"}',
+                },
+            }]}, "tool_calls")],
+            [native_chunk({"content": "请在表格中确认是否创建。"}, "stop")],
+        ])
+        candidate = {
+            "id": "mail-candidate-test",
+            "company_name": "卓望公司",
+            "position_name": "全栈开发工程师",
+            "base_location": "广州",
+            "current_status": "笔试中",
+            "interview_time": None,
+            "source_subject": "卓望公司笔试通知",
+        }
+        self.use_provider(provider, lambda _name, _arguments: {
+            "task_id": "mail-test",
+            "status": "partial_success",
+            "result": {"creation_candidates": [candidate]},
+            "error": None,
+        })
+        response = self.request()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["app_data"]["email_creation_candidates"][0]["company_name"],
+            "卓望公司",
+        )
 
 
 if __name__ == "__main__":

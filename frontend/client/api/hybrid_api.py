@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import json
+import mimetypes
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -52,6 +54,7 @@ class HybridApiClient(ApiClient):
         params = dict(params)
         paths = {
             "sync_email": ("POST", "/email/sync"),
+            "create_email_candidates": ("POST", "/email/candidates/create"),
             "recommend_jobs": ("POST", "/job-recommendations"),
             "create_mock_interview": ("POST", "/mock-interviews"),
         }
@@ -78,6 +81,8 @@ class HybridApiClient(ApiClient):
 
     async def invoke_async(self, name: str, **params) -> dict:
         """在界面工作线程的事件循环中执行可取消的耗时业务请求。"""
+        if name == "upload_resume":
+            return await self._upload_resume_async(params["file_path"])
         method, path, body = self._business_request(name, params)
         try:
             async with httpx.AsyncClient(base_url=str(self._http.base_url), timeout=180.0,
@@ -98,9 +103,16 @@ class HybridApiClient(ApiClient):
             "limit": limit, "scope": scope, "extensions": extensions,
         })
 
-    def recommend_jobs(self, cities, tech_stack, business_preferences=None, keywords=None, page=1, page_size=10, extensions=None):
+    def create_email_candidates(self, candidate_ids):
+        """创建邮件审核表中由用户明确选中的投递记录。"""
+        return self._business_call(
+            "create_email_candidates", {"candidate_ids": candidate_ids}
+        )
+
+    def recommend_jobs(self, cities, work_experience="应届生", tech_stack=None, business_preferences=None, keywords=None, page=1, page_size=10, extensions=None):
         """按指定求职条件和筛选参数获取一页岗位推荐。"""
-        return self._business_call("recommend_jobs", {"cities": cities, "tech_stack": tech_stack,
+        return self._business_call("recommend_jobs", {"cities": cities, "work_experience": work_experience,
+            "tech_stack": tech_stack or [],
             "business_preferences": business_preferences, "keywords": keywords,
             "page": page, "page_size": page_size, "extensions": extensions})
 
@@ -108,10 +120,42 @@ class HybridApiClient(ApiClient):
         """根据推荐记录 ID 获取已保存的岗位详情。"""
         return self._business_call("get_job_recommendation", {"recommendation_id": recommendation_id})
 
-    def create_mock_interview(self, company_name, position_name, interview_round, interview_focus=None, extensions=None):
+    def upload_resume(self, file_path):
+        """以 multipart/form-data 上传本地简历文件。"""
+        path = Path(file_path)
+        with path.open("rb") as stream:
+            return self._request("POST", "/mock-interviews/resumes", timeout=60.0, files={
+                "file": (path.name, stream, mimetypes.guess_type(path.name)[0] or "application/octet-stream"),
+            })
+
+    async def _upload_resume_async(self, file_path):
+        """在页面工作线程中异步上传简历，避免阻塞 Qt 界面。"""
+        path = Path(file_path)
+        try:
+            async with httpx.AsyncClient(
+                base_url=str(self._http.base_url), timeout=60.0,
+                trust_env=False, transport=self._transport,
+            ) as client:
+                with path.open("rb") as stream:
+                    response = await client.post("/mock-interviews/resumes", files={
+                        "file": (path.name, stream, mimetypes.guess_type(path.name)[0] or "application/octet-stream"),
+                    })
+                if response.is_error:
+                    raise ApiRequestError(_response_error(response))
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ApiRequestError("服务端响应格式错误。")
+                return payload
+        except OSError as exc:
+            raise ApiRequestError("无法读取所选简历文件。") from exc
+        except httpx.RequestError as exc:
+            raise ApiRequestError("简历上传失败，请检查服务端连接。") from exc
+
+    def create_mock_interview(self, company_name, position_name, interview_round, interview_focus=None, resume_id=None, extensions=None):
         """根据目标公司、岗位和考察方向创建由模型驱动的模拟面试。"""
         return self._business_call("create_mock_interview", {"company_name": company_name, "position_name": position_name,
-            "interview_round": interview_round, "interview_focus": interview_focus, "extensions": extensions})
+            "interview_round": interview_round, "interview_focus": interview_focus,
+            "resume_id": resume_id, "extensions": extensions})
 
     def submit_mock_answer(self, session_id, question_id, answer, extensions=None):
         """为指定的待回答题目提交答案。"""

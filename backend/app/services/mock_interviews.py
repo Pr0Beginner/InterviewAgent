@@ -1,31 +1,40 @@
 """由 Skill 驱动的模拟面试，使用本地 JSON 持久化并控制并发。"""
 
 from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 
 from backend.app.agent.provider import DeepSeekProvider
+from backend.app.agent.skills import load_skill
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ApplicationError
 from backend.app.schemas.business import InterviewQuestion, AnswerEvaluation, InterviewReport
+from backend.app.services.resumes import ResumeService
 from backend.app.storage.local import LocalStateStore
 
-SKILL = (Path(__file__).resolve().parents[1] / "agent/skills/mock_interview.md").read_text(encoding="utf-8")
+SKILL = load_skill("mock-interview")
 
 
 class MockInterviewService:
     """生成题目、评价回答，并恢复已持久化的面试会话。"""
 
-    def __init__(self, state_store=None, provider=None, max_questions=None):
+    def __init__(self, state_store=None, provider=None, max_questions=None, resume_service=None):
         """注入本地状态文件、模型和题目数量上限，便于测试。"""
         self.state_store = state_store or LocalStateStore()
         self.provider = provider or DeepSeekProvider(get_settings())
         self.max_questions = max_questions or get_settings().mock_interview_max_questions
+        self.resume_service = resume_service or ResumeService(state_store=self.state_store)
 
     async def create(self, request) -> dict:
         """生成第一道题，仅在成功后保存面试会话。"""
         context = request.model_dump(exclude={"extensions"})
-        question = await self.provider.structured(SKILL, {"task": "提出第一个问题", "context": context}, InterviewQuestion)
+        if context.get("resume_id"):
+            resume = self.resume_service.get(context["resume_id"])
+            context["resume_file_name"] = resume["file_name"]
+        question = await self.provider.structured(
+            SKILL,
+            {"task": "提出第一个问题", "context": self._model_context(context)},
+            InterviewQuestion,
+        )
         session_id, question_id = "mock-" + uuid4().hex, "q-" + uuid4().hex
         created_at = datetime.now().isoformat()
         self.state_store.put("mock_sessions", session_id, {
@@ -37,7 +46,17 @@ class MockInterviewService:
             "report": None,
             "created_at": created_at,
         })
-        return {"session_id": session_id, "question_id": question_id, "question": question.question, "status": "in_progress", "created_at": created_at}
+        return {
+            "session_id": session_id,
+            "question_id": question_id,
+            "question": question.question,
+            "status": "in_progress",
+            "created_at": created_at,
+            "resume": (
+                {"id": context["resume_id"], "file_name": context["resume_file_name"]}
+                if context.get("resume_id") else None
+            ),
+        }
 
     def get(self, session_id: str) -> dict:
         """恢复一场已保存的面试，包括待回答题目和总结。"""
@@ -58,7 +77,7 @@ class MockInterviewService:
         if state["status"] != "in_progress" or state["turns"][-1]["question_id"] != request.question_id:
             raise ApplicationError("QUESTION_CONFLICT", "题目已变化或面试已结束，请刷新。", status_code=409)
         evaluation = await self.provider.structured(SKILL, {
-            "task": "评价当前回答并决定追问或下一题", "context": state["context"],
+            "task": "评价当前回答并决定追问或下一题", "context": self._model_context(state["context"]),
             "history": state["turns"], "answer": request.answer,
         }, AnswerEvaluation)
         completed = len(state["turns"]) >= self.max_questions
@@ -80,7 +99,11 @@ class MockInterviewService:
             return state["report"]
         answered = [turn for turn in state["turns"] if "answer" in turn]
         if answered:
-            report = await self.provider.structured(SKILL, {"task": "结束面试并总结", "context": state["context"], "answers": answered}, InterviewReport)
+            report = await self.provider.structured(SKILL, {
+                "task": "结束面试并总结",
+                "context": self._model_context(state["context"]),
+                "answers": answered,
+            }, InterviewReport)
             result = report.model_dump()
         else:
             result = {"overall_score": 0, "summary": "尚未提交回答，无法评价。", "strengths": [], "weaknesses": [], "suggestions": ["完成至少一道题后再生成评价。"]}
@@ -91,3 +114,11 @@ class MockInterviewService:
     def _save(self, session_id: str, expected_version: int, **values) -> None:
         """仅在没有其他回答或结束请求更新会话时提交生成结果。"""
         self.state_store.update_if_version("mock_sessions", session_id, expected_version, values)
+
+    def _model_context(self, context: dict) -> dict:
+        """按需读取简历正文，避免把大段文本重复写入会话 JSON。"""
+        result = dict(context)
+        resume_id = result.get("resume_id")
+        if resume_id:
+            result["resume"] = self.resume_service.model_context(resume_id)
+        return result

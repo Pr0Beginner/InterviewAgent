@@ -55,7 +55,7 @@ class TaskQuery(BaseModel):
 
 
 BUSINESS_TOOL_MODELS = {
-    "recommend_jobs": (JobSearchRequest, "根据城市、技术栈等搜索真实 BOSS 岗位并给出匹配度、JD 与投递链接"),
+    "recommend_jobs": (JobSearchRequest, "按可多选城市和岗位关键词调用 BOSS 抓取能力，再由 Agent 分析真实 JD、薪资和岗位要求"),
     "start_mock_interview": (MockInterviewRequest, "创建模拟面试会话并提出第一个问题"),
     "submit_mock_answer": (SessionAnswer, "评价模拟面试回答并动态追问；必须使用此前返回的会话与题目 ID"),
     "finish_mock_interview": (SessionFinish, "结束模拟面试并生成基于实际回答的总结"),
