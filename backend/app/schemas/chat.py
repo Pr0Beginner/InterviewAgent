@@ -22,6 +22,23 @@ class StreamOptions(BaseModel):
     include_usage: bool = Field(default=False, description="结束前额外返回 token 用量块。")
 
 
+class RecommendationPageState(BaseModel):
+    """推荐岗位页当前可见筛选条件，只作为 Agent 的默认上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+    cities: list[str] = Field(default_factory=list, max_length=10)
+    work_experience: Literal["不限", "应届生", "1年以内", "1-3年", "3-5年", "5-10年", "10年以上"] = "应届生"
+    keywords: list[str] = Field(default_factory=list, max_length=20)
+    search_id: str | None = Field(default=None, max_length=80)
+    result_count: int = Field(default=0, ge=0, le=10000)
+
+    @model_validator(mode="after")
+    def validate_text_lengths(self) -> "RecommendationPageState":
+        if any(not value.strip() or len(value) > 80 for value in [*self.cities, *self.keywords]):
+            raise ValueError("页面筛选项必须为 1 到 80 个字符")
+        return self
+
+
 class ChatCompletionRequest(BaseModel):
     """受支持的 OpenAI 参数及应用扩展 Map。"""
 
@@ -61,4 +78,6 @@ class ChatCompletionRequest(BaseModel):
             raise ValueError("metadata 的键最多 64 字符，值最多 512 字符")
         if sum(len(message.content) for message in self.messages) > 128000:
             raise ValueError("对话历史过长，请开始新对话")
+        if "page_state" in self.extensions:
+            RecommendationPageState.model_validate(self.extensions["page_state"])
         return self

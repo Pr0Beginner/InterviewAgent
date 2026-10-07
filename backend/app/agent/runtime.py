@@ -25,7 +25,7 @@ from backend.app.observability import (
     trace_attributes,
     update_observation,
 )
-from backend.app.schemas.chat import ChatCompletionRequest
+from backend.app.schemas.chat import ChatCompletionRequest, RecommendationPageState
 
 
 LOGGER = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class AgentRuntime:
         self.provider.ensure_configured()
 
     async def chunks(self, request: ChatCompletionRequest) -> AsyncIterator[dict[str, Any]]:
-        """在限定总时长内，逐个返回本次请求的标准响应块。
+        """按模型和工具各自的阶段时限，逐个返回本次请求的标准响应块。
         
         参数:
             request: 已校验的对话、页面元数据和生成参数。
@@ -92,18 +92,15 @@ class AgentRuntime:
                 content: list[str] = []
                 finish_reason = None
                 try:
-                    async with asyncio.timeout(self.settings.agent_timeout_seconds):
-                        async with aclosing(self._run(request)) as chunks:
-                            async for chunk in chunks:
-                                for choice in chunk.get("choices", []):
-                                    text = choice.get("delta", {}).get("content")
-                                    if text:
-                                        content.append(text)
-                                    finish_reason = choice.get("finish_reason") or finish_reason
-                                yield chunk
-                except TimeoutError as exc:
-                    update_observation(agent, level="ERROR", status_message="agent_timeout")
-                    raise AgentError("Agent 处理超时，请稍后重试。", "agent_timeout", 504) from exc
+                    # 模型请求和浏览器页面各自有独立超时；不再用一个总时限截断整条工具链。
+                    async with aclosing(self._run(request)) as chunks:
+                        async for chunk in chunks:
+                            for choice in chunk.get("choices", []):
+                                text = choice.get("delta", {}).get("content")
+                                if text:
+                                    content.append(text)
+                                finish_reason = choice.get("finish_reason") or finish_reason
+                            yield chunk
                 except AgentError as exc:
                     update_observation(agent, level="ERROR", status_message=exc.code)
                     raise
@@ -170,6 +167,17 @@ class AgentRuntime:
             "content": system_prompt(page_context),
         }]
         if page_context == "recommendations":
+            raw_page_state = request.extensions.get("page_state")
+            if raw_page_state is not None:
+                page_state = RecommendationPageState.model_validate(raw_page_state)
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "当前推荐岗位页面筛选状态（仅用于补全用户未说明的条件；"
+                        "用户本轮自然语言中明确提出的条件优先，不得虚构）："
+                        + json.dumps(page_state.model_dump(), ensure_ascii=False)
+                    ),
+                })
             preference_summary = await asyncio.to_thread(
                 self.preference_memory_store.read_summary
             )
@@ -276,6 +284,15 @@ class AgentRuntime:
                         elif function["name"] in {"update_interview", "update_interview_status"} and arguments.get("interview_id") not in queried_ids:
                             result = {"error": "本轮尚未查询该记录，请先调用查询工具并确认唯一目标。"}
                         else:
+                            if function["name"] == "recommend_jobs":
+                                yield {
+                                    **identity,
+                                    "choices": [],
+                                    "app_data": {"agent_status": {
+                                        "stage": "job_search",
+                                        "message": "正在抓取岗位并批量分析 JD…",
+                                    }},
+                                }
                             result = await asyncio.to_thread(
                                 self.tool_executor, function["name"], function["arguments"],
                             )
@@ -299,6 +316,16 @@ class AgentRuntime:
                     "role": "tool", "tool_call_id": call["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 })
+                if function["name"] == "recommend_jobs" and not result.get("error"):
+                    job_result = result.get("result", result)
+                    yield {
+                        **identity,
+                        "choices": [],
+                        "app_data": {"agent_status": {
+                            "stage": "job_search_complete",
+                            "message": f"已完成岗位抓取与分析，共 {job_result.get('total', 0)} 个结果。",
+                        }},
+                    }
                 if function["name"] in {"scan_emails", "scan_unread_emails"}:
                     candidates = result.get("result", {}).get("creation_candidates", [])
                     if candidates:

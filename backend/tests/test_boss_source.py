@@ -1,8 +1,14 @@
 """BOSS 搜索计划、URL 安全边界和 HTML 解析测试。"""
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from backend.app.integrations.boss import (
+    BossJobSource,
     BossSearchPlan,
     build_search_plans,
     build_search_url,
@@ -12,6 +18,35 @@ from backend.app.integrations.boss import (
     normalize_listing,
     valid_job_url,
 )
+
+
+class _PlaywrightManager:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+class _ReuseProbeSource(BossJobSource):
+    def __init__(self, settings):
+        super().__init__(settings=settings)
+        self.page = object()
+        self.open_count = 0
+        self.seen_pages = []
+
+    @asynccontextmanager
+    async def _browser_page(self, _playwright):
+        self.open_count += 1
+        yield self.page
+
+    async def _collect_listings(self, page, _plans, _limit):
+        self.seen_pages.append(page)
+        return [{"job_id": "job-1"}]
+
+    async def _collect_details(self, page, _listings, _limit):
+        self.seen_pages.append(page)
+        return [{"job_id": "job-1", "job_description": "职位描述：开发服务"}]
 
 
 class BossSourceTest(unittest.TestCase):
@@ -121,6 +156,24 @@ class BossSourceTest(unittest.TestCase):
         html = """<section class="job-sec-text"><p>主要职责</p><p>开发后台服务。</p>
         <p>任职要求：</p><p>熟悉 Java。</p></section>"""
         self.assertIn("岗位职责：", extract_job_description(html))
+
+
+class BossSourceAsyncTest(unittest.IsolatedAsyncioTestCase):
+    async def test_search_reuses_one_browser_page_for_list_and_details(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            (profile / ".configured").touch()
+            settings = SimpleNamespace(
+                boss_profile_path=profile,
+                jobs_pages_per_query=1,
+                jobs_max_search_pages=1,
+            )
+            source = _ReuseProbeSource(settings)
+            with patch("backend.app.integrations.boss.async_playwright", return_value=_PlaywrightManager()):
+                jobs = await source.search(["Java 后端"], 10, ["广州"], "应届生")
+        self.assertEqual(source.open_count, 1)
+        self.assertEqual(source.seen_pages, [source.page, source.page])
+        self.assertEqual(jobs[0]["job_id"], "job-1")
 
 
 if __name__ == "__main__":

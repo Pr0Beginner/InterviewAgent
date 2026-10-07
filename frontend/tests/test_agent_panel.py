@@ -27,7 +27,7 @@ class DelayedApi(MockApiClient):
         self.captured = None
 
     async def stream_chat_completion(self, messages, model="interview-assistant", metadata=None, extensions=None):
-        self.captured = {"messages": messages, "metadata": metadata}
+        self.captured = {"messages": messages, "metadata": metadata, "extensions": extensions}
         await asyncio.sleep(self.delay)
         async for chunk in super().stream_chat_completion(messages, model, metadata, extensions):
             yield chunk
@@ -58,14 +58,38 @@ class AgentPanelTest(unittest.TestCase):
         self.assertIn("进行中", panel.messages.toPlainText())
         panel.close()
 
-    def test_cancel_discards_failed_exchange_and_restores_input(self):
+    def test_cancel_discards_failed_exchange_and_offers_inline_retry(self):
         panel = AgentPanel(DelayedApi(30))
         panel.input.setPlainText("查面试")
         panel._send_message()
         panel.cancel()
         self.wait_until(lambda: not panel.is_busy)
         self.assertEqual(panel._histories["applications"], [])
-        self.assertEqual(panel.input.toPlainText(), "查面试")
+        self.assertEqual(panel.input.toPlainText(), "")
+        self.assertFalse(panel.retry_button.isHidden())
+        self.assertEqual(
+            sum(item["kind"] == "user" and item["content"] == "查面试" for item in panel._transcript),
+            1,
+        )
+        panel.close()
+
+    def test_recommendation_filters_are_sent_as_ephemeral_page_state(self):
+        api = DelayedApi()
+        panel = AgentPanel(api)
+        page_state = {
+            "cities": ["广州", "深圳"],
+            "work_experience": "应届生",
+            "keywords": ["Java 后端"],
+            "search_id": None,
+            "result_count": 0,
+        }
+        panel.set_page_state_provider(lambda page: page_state if page == "recommendations" else {})
+        panel.set_page_context("recommendations")
+        panel.input.setPlainText("哪些岗位更适合我？")
+        panel._send_message()
+        self.wait_until(lambda: api.captured is not None)
+        self.assertEqual(api.captured["extensions"]["page_state"], page_state)
+        self.wait_until(lambda: not panel.is_busy)
         panel.close()
 
     def test_enter_sends_and_shift_enter_adds_newline(self):

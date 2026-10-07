@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardPage(self.api)
         self.jobs_page = JobsPage(self.api)
         self.mock_page = MockInterviewPage(self.api)
+        self.agent_panel.set_page_state_provider(self._agent_page_state)
         self.dashboard.event_message.connect(self.agent_panel.add_system_message)
         self.dashboard.email_candidates.connect(self.agent_panel.show_email_candidates)
         self.jobs_page.event_message.connect(self.agent_panel.add_system_message)
@@ -140,6 +141,12 @@ class MainWindow(QMainWindow):
         self.agent_panel.setVisible(show_agent)
         if show_agent:
             self.content_splitter.setSizes([1190, 350])
+
+    def _agent_page_state(self, page_context: str) -> dict:
+        """按发送瞬间读取页面选项，不把临时筛选状态写入本地文件。"""
+        if page_context == "recommendations":
+            return self.jobs_page.agent_context()
+        return {}
 
     def _refresh_after_agent(self) -> None:
         if self._closing_after_agent or self.dashboard.has_pending_changes:

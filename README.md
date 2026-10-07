@@ -25,20 +25,7 @@ Interview Assistant 是一个面向个人秋招管理的桌面 Agent。它把投
 
 ## 系统架构
 
-```mermaid
-flowchart TB
-    UI[PySide6 桌面客户端] --> API[FastAPI 服务]
-    API --> AGENT[LangGraph / ReAct Agent]
-    API --> SERVICE[投递、邮件、岗位、模拟面试服务]
-    AGENT --> SERVICE
-    SERVICE --> MD[interviews.md 投递记录]
-    SERVICE --> JSON[runtime.json 运行状态]
-    AGENT --> SQLITE[SQLite 图检查点]
-    AGENT -. 可选观测 .-> LF[Langfuse]
-    SERVICE --> MAIL[网易邮箱 IMAP]
-    SERVICE --> BOSS[BOSS 直聘]
-    AGENT --> LLM[DeepSeek API]
-```
+![秋招 Agent 系统架构](image.png)
 
 ### 技术栈
 

@@ -3,6 +3,8 @@
 import asyncio
 from hashlib import sha256
 import json
+import logging
+from time import perf_counter
 from uuid import uuid4
 
 from backend.app.agent.provider import DeepSeekProvider
@@ -16,6 +18,7 @@ from backend.app.storage.local import LocalStateStore
 
 SKILL = load_skill("job-recommendation")
 MODEL_JD_CHARACTER_LIMIT = 12000
+LOGGER = logging.getLogger(__name__)
 
 
 class JobService:
@@ -32,6 +35,7 @@ class JobService:
 
     async def recommend(self, request) -> dict:
         """创建或复用搜索快照，后续翻页不重复调用模型。"""
+        started_at = perf_counter()
         criteria = request.model_dump(exclude={"page", "page_size", "extensions"})
         preference_summary = await asyncio.to_thread(
             self.preference_memory_store.read_summary
@@ -45,12 +49,15 @@ class JobService:
             return self._page([], request, cache_id, "尚无匹配结果，点击重新匹配开始搜索。")
         if items is None or (request.extensions.get("refresh") and not request.extensions.get("cached_only")):
             self.provider.ensure_configured()
+            source_started_at = perf_counter()
             sources = await self.source.search(
                 request.keywords or request.tech_stack,
                 get_settings().jobs_max_candidates,
                 cities=request.cities,
                 work_experience=request.work_experience,
             )
+            source_elapsed = perf_counter() - source_started_at
+            assessment_started_at = perf_counter()
             batch = await self.provider.structured(SKILL, {
                 "task": "批量评估全部岗位；每个 source_index 必须且只能返回一次",
                 "profile": criteria,
@@ -63,6 +70,7 @@ class JobService:
                     for index, source in enumerate(sources)
                 ],
             }, JobAssessmentBatch)
+            assessment_elapsed = perf_counter() - assessment_started_at
             assessments = {item.source_index: item for item in batch.items}
             expected_indexes = set(range(len(sources)))
             if set(assessments) != expected_indexes:
@@ -95,6 +103,20 @@ class JobService:
                 "status": "completed",
                 "result": {"criteria": criteria, "items": items},
             })
+            LOGGER.info(
+                "job_recommendation_complete cache_hit=false sources=%s results=%s source_ms=%d assessment_ms=%d total_ms=%d",
+                len(sources),
+                len(items),
+                round(source_elapsed * 1000),
+                round(assessment_elapsed * 1000),
+                round((perf_counter() - started_at) * 1000),
+            )
+        else:
+            LOGGER.info(
+                "job_recommendation_complete cache_hit=true results=%s total_ms=%d",
+                len(items),
+                round((perf_counter() - started_at) * 1000),
+            )
         return self._page(items, request, cache_id)
 
     def get(self, recommendation_id: str) -> dict:

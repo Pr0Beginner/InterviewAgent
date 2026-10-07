@@ -5,6 +5,7 @@ import asyncio
 from contextlib import aclosing
 import re
 from threading import Event
+from typing import Callable
 from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QSize, Qt, QThread, Signal
@@ -36,12 +37,20 @@ class ChatWorker(QThread):
     completed = Signal()
     failed = Signal(str)
 
-    def __init__(self, api: ApiClient, messages: list[dict], metadata: dict, parent=None):
+    def __init__(
+        self,
+        api: ApiClient,
+        messages: list[dict],
+        metadata: dict,
+        extensions: dict | None = None,
+        parent=None,
+    ):
         """启动工作线程前保存接口客户端、对话历史和页面元数据。"""
         super().__init__(parent)
         self.api = api
         self.request_messages = messages
         self.metadata = metadata
+        self.extensions = extensions or {}
         self.cancelled = Event()
         self.loop = None
         self.task = None
@@ -66,7 +75,7 @@ class ChatWorker(QThread):
         if self.cancelled.is_set():
             raise asyncio.CancelledError
         async with aclosing(self.api.stream_chat_completion(
-            self.request_messages, metadata=self.metadata,
+            self.request_messages, metadata=self.metadata, extensions=self.extensions,
         )) as chunks:
             async for chunk in chunks:
                 self.chunk_received.emit(chunk)
@@ -131,6 +140,9 @@ class AgentPanel(QFrame):
         self._pending_page = "applications"
         self._pending_message = ""
         self._finish_reason = None
+        self._pending_extensions: dict = {}
+        self._failed_reply_item: dict | None = None
+        self._page_state_provider: Callable[[str], dict] = lambda _page: {}
         self._email_candidates: dict[str, dict] = {}
         self.page_context = "applications"
         self.setObjectName("AgentPanel")
@@ -261,6 +273,11 @@ class AgentPanel(QFrame):
         input_hint.setToolTip("Shift + Enter 换行")
         input_hint.setObjectName("InputHint")
         action_row.addWidget(input_hint)
+        self.retry_button = QPushButton("重试上次请求")
+        self.retry_button.setObjectName("SecondaryButton")
+        self.retry_button.clicked.connect(self._retry_message)
+        self.retry_button.hide()
+        action_row.addWidget(self.retry_button)
         action_row.addStretch()
         action_row.addWidget(self.send_button)
 
@@ -315,6 +332,10 @@ class AgentPanel(QFrame):
         for button, suggestion in zip(self.suggestion_buttons, context["suggestions"]):
             button.setText(suggestion)
 
+    def set_page_state_provider(self, provider: Callable[[str], dict]) -> None:
+        """注册轻量页面状态读取器，发送时即时获取，不做持久化。"""
+        self._page_state_provider = provider
+
     def add_system_message(self, content: str) -> None:
         """显示本地页面提示，不将其加入模型对话历史。"""
         self._transcript.append({"kind": "agent", "content": content, "label": "系统"})
@@ -347,17 +368,45 @@ class AgentPanel(QFrame):
         self.input.clear()
         self._pending_page = self.page_context
         self._pending_message = message
+        self._pending_extensions = {
+            "page_state": self._page_state_provider(self.page_context),
+        } if self.page_context == "recommendations" else {}
+        self._begin_request(append_transcript=True)
+
+    def _retry_message(self) -> None:
+        """在原失败消息上重试，不重复添加用户问题或扩大输入框。"""
+        if self.is_busy or self._failed_reply_item is None or not self._pending_message:
+            return
+        self._begin_request(append_transcript=False)
+
+    def _begin_request(self, append_transcript: bool) -> None:
+        """启动一次请求；重试复用原消息卡片，普通发送创建新卡片。"""
         self._reply = ""
         self._finish_reason = None
-        self._transcript.append({"kind": "user", "content": message, "label": "我"})
-        self._reply_item = {"kind": "agent", "content": "正在处理…", "label": f"Agent · {self.PAGE_CONTEXTS[self.page_context]['title']}"}
-        self._transcript.append(self._reply_item)
+        if append_transcript:
+            self.retry_button.hide()
+            self._failed_reply_item = None
+            self._transcript.append({"kind": "user", "content": self._pending_message, "label": "我"})
+            self._reply_item = {
+                "kind": "agent",
+                "content": "正在理解你的问题…",
+                "label": f"Agent · {self.PAGE_CONTEXTS[self._pending_page]['title']}",
+            }
+            self._transcript.append(self._reply_item)
+        else:
+            self._reply_item = self._failed_reply_item
+            self._reply_item["kind"] = "agent"
+            self._reply_item["content"] = "正在重新处理…"
+            self.retry_button.hide()
         self._render_messages()
-        messages = [*self._histories[self.page_context], {"role": "user", "content": message}]
+        messages = [
+            *self._histories[self._pending_page],
+            {"role": "user", "content": self._pending_message},
+        ]
         self._worker = ChatWorker(self.api, messages, {
-            "page_context": self.page_context,
-            "conversation_id": self._conversation_ids[self.page_context],
-        }, self)
+            "page_context": self._pending_page,
+            "conversation_id": self._conversation_ids[self._pending_page],
+        }, self._pending_extensions, self)
         self._worker.chunk_received.connect(self._on_chunk)
         self._worker.completed.connect(self._on_completed)
         self._worker.failed.connect(self._on_failed)
@@ -373,13 +422,18 @@ class AgentPanel(QFrame):
 
     def _on_chunk(self, chunk: dict) -> None:
         """仅追加助手回复文本，不将模型推理内容显示到界面。"""
-        candidates = chunk.get("app_data", {}).get("email_creation_candidates", [])
+        app_data = chunk.get("app_data", {})
+        candidates = app_data.get("email_creation_candidates", [])
         if candidates:
             self.show_email_candidates(candidates)
+        status = app_data.get("agent_status", {})
+        if status.get("message") and not self._reply:
+            self._reply_item["content"] = status["message"]
         for choice in chunk.get("choices", []):
             self._reply += choice.get("delta", {}).get("content") or ""
             self._finish_reason = choice.get("finish_reason") or self._finish_reason
-        self._reply_item["content"] = self._reply or "正在处理…"
+        if self._reply:
+            self._reply_item["content"] = self._reply
         self._render_messages()
 
     def _on_completed(self) -> None:
@@ -394,14 +448,20 @@ class AgentPanel(QFrame):
             {"role": "user", "content": self._pending_message},
             {"role": "assistant", "content": self._reply},
         ])
+        self._failed_reply_item = None
+        self.retry_button.hide()
         if self._finish_reason == "length":
             self.add_system_message("本次回复达到长度限制，可以发送“继续”。")
 
     def _on_failed(self, message: str) -> None:
-        """保留已显示的部分回复，并恢复失败的输入以便重试。"""
-        self._reply_item["content"] = ((self._reply + "\n\n") if self._reply else "") + message
-        if not self.input.toPlainText().strip():
-            self.input.setPlainText(self._pending_message)
+        """在原回复卡片中展示失败，并提供不会复制对话的原位重试。"""
+        self._reply_item["kind"] = "error"
+        self._reply_item["content"] = (
+            ((self._reply + "\n\n") if self._reply else "")
+            + "处理未完成：" + message
+        )
+        self._failed_reply_item = self._reply_item
+        self.retry_button.show()
         self._render_messages()
 
     def _on_finished(self) -> None:
@@ -541,6 +601,8 @@ class AgentPanel(QFrame):
         self.messages.setVisible(has_conversation)
         body = "".join(
             _user_bubble(item["content"]) if item["kind"] == "user"
+            else _error_bubble(item["content"], item["label"])
+            if item["kind"] == "error"
             else _agent_bubble(item["content"], item["label"])
             for item in self._transcript
         )
@@ -574,6 +636,17 @@ def _user_bubble(content: str) -> str:
         "<table width='86%' align='right' cellspacing='0' cellpadding='11' "
         "style='background:#EEE7F9;border:0;'>"
         f"<tr><td><div style='color:#1D1D1F'>{_markdown_fragment(content)}</div></td></tr></table><br>"
+    )
+
+
+def _error_bubble(content: str, label: str = "Agent") -> str:
+    """生成克制的内联错误状态，不把输入区或消息区域撑大。"""
+    return (
+        "<table width='100%' cellspacing='0' cellpadding='8' "
+        "style='background:#FFF7F3;border:1px solid #E8C8BA;'>"
+        "<tr><td width='24' valign='top'><span style='color:#B66A4A;font-size:16px'>!</span></td>"
+        f"<td valign='top'><span style='color:#6E3E2C;font-weight:700'>{escape(label)}</span>"
+        f"<div style='color:#6E4A3D'>{_markdown_fragment(content)}</div></td></tr></table><br>"
     )
 
 

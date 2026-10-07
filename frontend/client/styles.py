@@ -150,6 +150,9 @@ QPushButton#SuggestionButton:hover { color: #8061BE; border-color: #CBB8EC; back
 QPushButton#SuggestionButton:focus { border-color: #987BD6; }
 QTextBrowser { background: #FFFFFF; border: 1px solid #E9E3F0; border-radius: 12px; padding: 14px; }
 QTextBrowser#AgentMessages { background: transparent; border: none; padding: 0; color: #4B4555; }
+QTextBrowser#AgentMessages QScrollBar:vertical { width: 5px; margin: 4px 0; }
+QTextBrowser#AgentMessages QScrollBar::handle:vertical { min-height: 30px; background: #D8CEE5; border-radius: 2px; }
+QTextBrowser#AgentMessages QScrollBar::handle:vertical:hover { background: #BDAECE; }
 QFrame#Composer { background: rgba(255,255,255,195); border: 1px solid rgba(255,255,255,250); border-radius: 16px; }
 QFrame#Composer[focused="true"] { border-color: #987BD6; }
 QPlainTextEdit#AgentInput { background: transparent; border: none; border-radius: 0; padding: 2px; }
@@ -219,8 +222,15 @@ QLabel#JobLink { color: #7555B1; font-size: 12px; }
 QLabel#JobLink a { color: #7555B1; text-decoration: none; }
 QFrame#JdHoverArea { background: transparent; border: none; }
 QLabel#JdTrigger { color: #7555B1; font-size: 12px; font-weight: 600; padding: 4px 0; }
-QFrame#JdPreview { background: #F7F3FB; border: 1px solid #D8C9E9; border-radius: 10px; }
-QLabel#JdText { color: #554B63; font-size: 12px; }
+QLabel#JdTrigger:hover { color: #604296; }
+QFrame#JdPreview {
+    background: #FCFAFE; border: 1px solid #CDBBE4; border-radius: 13px;
+}
+QLabel#JdBubbleTitle { color: #3C3447; font-size: 13px; font-weight: 600; }
+QTextBrowser#JdText {
+    color: #554B63; background: transparent; border: none; padding: 0;
+    font-size: 12px; line-height: 1.45;
+}
 QLabel#JobEmptyState { color: #82778D; background: rgba(255,255,255,120); border: 1px dashed #D8CDE2; border-radius: 12px; padding: 36px; }
 QPushButton#ResumeUploadButton {
     min-width: 38px; max-width: 38px; min-height: 38px; max-height: 38px;

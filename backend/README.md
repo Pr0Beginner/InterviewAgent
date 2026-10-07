@@ -54,7 +54,8 @@ start.bat
 | `JOBS_MAX_CANDIDATES` | 单次读取候选数，默认 10 |
 | `JOBS_PAGES_PER_QUERY` | 每个城市和关键词最多读取的列表页数，默认 2 |
 | `JOBS_MAX_SEARCH_PAGES` | 单次搜索最多请求的列表页总数，默认 6 |
-| `JOBS_BROWSER_SETTLE_SECONDS` | 普通 Chrome 打开页面后等待渲染的秒数，默认 8 |
+| `JOBS_PAGE_TIMEOUT_SECONDS` | 单个 BOSS 页面等待业务 DOM 的最大秒数，默认 15 |
+| `JOBS_DOM_STABLE_SECONDS` | 业务 DOM 出现后用于吸收末尾渲染的短暂等待，默认 0.5 |
 | `JOBS_REQUEST_INTERVAL_SECONDS` | BOSS 页面请求最小间隔，默认 3 秒，不能低于 1 秒 |
 | `MOCK_INTERVIEW_MAX_QUESTIONS` | 每场最多题数，默认 8 |
 

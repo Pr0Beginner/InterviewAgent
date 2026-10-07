@@ -6,6 +6,7 @@ import unittest
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 from pypdf import PdfWriter
@@ -105,6 +106,53 @@ class SkillServicesTest(StoreTest):
         saved = service.save("resume.pdf", buffer.getvalue())
 
         self.assertIn("Spring Boot", service.model_context(saved["id"])["text"])
+        self.assertIn(saved["parse_method"], {"pypdf", "pymupdf"})
+        self.assertGreaterEqual(saved["quality_score"], 0.65)
+
+    def test_pdf_uses_alternate_extractor_when_primary_text_is_garbled(self):
+        service = ResumeService(Path(self.temp.name) / "resumes", self.state)
+        garbled = "ğᄝอ࿟ CDG ҆૊ҕაอ࿟৘ҍ๙֥ Agent " * 8
+        readable = "腾讯 CDG Agent 项目\n技术栈：Java、Spring Boot、KV Cache\n负责完整链路开发和性能优化。"
+
+        with (
+            patch.object(ResumeService, "_parse_pdf_pypdf", return_value=garbled),
+            patch.object(ResumeService, "_parse_pdf_pymupdf", return_value=readable),
+            patch.object(ResumeService, "_parse_pdf_ocr") as ocr,
+        ):
+            saved = service.save("resume.pdf", b"fake-pdf")
+
+        self.assertEqual(saved["parse_method"], "pymupdf")
+        self.assertIn("腾讯", service.model_context(saved["id"])["text"])
+        ocr.assert_not_called()
+
+    def test_pdf_uses_local_ocr_when_both_text_extractors_are_garbled(self):
+        service = ResumeService(Path(self.temp.name) / "resumes", self.state)
+        garbled = "ğᄝอ࿟ CDG ҆૊ҕაอ࿟৘ҍ๙֥ Agent " * 8
+        ocr_text = "腾讯实习经历\nCDG Agent 项目\n使用 KV Cache 优化完整业务链路。"
+
+        with (
+            patch.object(ResumeService, "_parse_pdf_pypdf", return_value=garbled),
+            patch.object(ResumeService, "_parse_pdf_pymupdf", return_value=garbled),
+            patch.object(ResumeService, "_parse_pdf_ocr", return_value=ocr_text),
+        ):
+            saved = service.save("resume.pdf", b"fake-pdf")
+
+        self.assertEqual(saved["parse_method"], "rapidocr")
+        self.assertIn("腾讯实习经历", service.model_context(saved["id"])["text"])
+
+    def test_unreadable_pdf_is_not_saved_as_resume_text(self):
+        service = ResumeService(Path(self.temp.name) / "resumes", self.state)
+        garbled = "ğᄝอ࿟ CDG ҆૊ҕაอ࿟৘ҍ๙֥ Agent " * 8
+
+        with (
+            patch.object(ResumeService, "_parse_pdf_pypdf", return_value=garbled),
+            patch.object(ResumeService, "_parse_pdf_pymupdf", return_value=garbled),
+            patch.object(ResumeService, "_parse_pdf_ocr", return_value=garbled),
+            self.assertRaisesRegex(ApplicationError, "未能可靠识别完整文字"),
+        ):
+            service.save("resume.pdf", b"fake-pdf")
+
+        self.assertEqual(list((Path(self.temp.name) / "resumes").glob("*.txt")), [])
 
     def test_resume_is_parsed_locally_and_injected_into_interview_prompt(self):
         document = Document()

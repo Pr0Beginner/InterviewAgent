@@ -77,6 +77,31 @@ class AgentApiTest(unittest.TestCase):
         self.assertIn("一次只问一道题", provider.requests[0]["messages"][0]["content"])
         self.assertNotIn("extensions", provider.requests[0])
 
+    def test_recommendation_page_state_is_injected_as_defaults(self):
+        provider = FakeProvider([[
+            native_chunk({"content": "会按当前条件搜索。"}, "stop")
+        ]])
+        self.use_provider(provider)
+        response = self.request(
+            metadata={"page_context": "recommendations"},
+            extensions={"page_state": {
+                "cities": ["广州", "深圳"],
+                "work_experience": "应届生",
+                "keywords": ["Java 后端"],
+                "search_id": None,
+                "result_count": 0,
+            }},
+        )
+        self.assertEqual(response.status_code, 200)
+        system_messages = [
+            message["content"]
+            for message in provider.requests[0]["messages"]
+            if message["role"] == "system"
+        ]
+        self.assertTrue(any("当前推荐岗位页面筛选状态" in content for content in system_messages))
+        self.assertTrue(any("用户本轮自然语言中明确提出的条件优先" in content for content in system_messages))
+        self.assertTrue(any("广州" in content and "应届生" in content for content in system_messages))
+
     def test_fragmented_tool_call_queries_real_records_then_streams_answer(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

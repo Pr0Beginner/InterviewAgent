@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     jobs_max_candidates: int = Field(default=10, ge=1, le=30)
     jobs_pages_per_query: int = Field(default=2, ge=1, le=5)
     jobs_max_search_pages: int = Field(default=6, ge=1, le=30)
+    jobs_page_timeout_seconds: float = Field(default=15.0, ge=3.0, le=60.0)
+    jobs_dom_stable_seconds: float = Field(default=0.5, ge=0.0, le=3.0)
+    # 兼容旧环境变量；页面等待已改为 DOM 就绪条件，不再使用固定 8 秒等待。
     jobs_browser_settle_seconds: float = Field(default=8.0, ge=3.0, le=30.0)
     jobs_request_interval_seconds: float = Field(default=3.0, ge=1.0, le=60.0)
     mock_interview_max_questions: int = Field(default=8, ge=1, le=20)

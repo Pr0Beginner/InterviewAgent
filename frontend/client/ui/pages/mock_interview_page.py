@@ -184,10 +184,21 @@ class MockInterviewPage(QWidget):
     def _resume_uploaded(self, result) -> None:
         self.resume_id = result["id"]
         self.resume_name.setText(result["file_name"])
+        method = result.get("parse_method")
+        method_label = {
+            "pypdf": "PDF 文本层",
+            "pymupdf": "PDF 兼容解析",
+            "rapidocr": "本地 OCR",
+            "python-docx": "Word 文本",
+        }.get(method, "本地解析")
+        score = result.get("quality_score")
+        quality = f"，质量评分 {score:.0%}" if isinstance(score, (int, float)) else ""
         self.resume_name.setToolTip(
-            f"已解析 {result['character_count']} 个字符，文本已保存到本地。"
+            f"已通过{method_label}识别 {result['character_count']} 个字符{quality}，文本已保存到本地。"
         )
-        self.notice.setText("简历解析完成，面试题会优先结合其中的技术栈和项目经历。")
+        self.notice.setText(
+            f"简历已通过{method_label}识别，面试题会结合完整文本中的技术栈和项目经历。"
+        )
 
     def _start_interview(self) -> None:
         if self.runner.busy:

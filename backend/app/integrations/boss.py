@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import logging
 from pathlib import Path
@@ -11,11 +12,16 @@ import shutil
 import socket
 import subprocess
 from threading import Lock
+from time import perf_counter
 from urllib.parse import urlencode, urljoin, urlparse
 import urllib.request
 
 from bs4 import BeautifulSoup
-from playwright.async_api import Error as BrowserError, async_playwright
+from playwright.async_api import (
+    Error as BrowserError,
+    TimeoutError as BrowserTimeoutError,
+    async_playwright,
+)
 
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ApplicationError
@@ -255,11 +261,26 @@ class BossJobSource:
             self.settings.jobs_max_search_pages,
             work_experience,
         )
+        started_at = perf_counter()
         try:
             try:
                 async with async_playwright() as playwright:
-                    listings = await self._collect_listings(playwright, plans, limit)
-                    return await self._collect_details(playwright, listings, limit)
+                    async with self._browser_page(playwright) as page:
+                        listing_started_at = perf_counter()
+                        listings = await self._collect_listings(page, plans, limit)
+                        listing_elapsed = perf_counter() - listing_started_at
+                        detail_started_at = perf_counter()
+                        jobs = await self._collect_details(page, listings, limit)
+                        LOGGER.info(
+                            "boss_search_complete plans=%s listings=%s jobs=%s listing_ms=%d detail_ms=%d total_ms=%d",
+                            len(plans),
+                            len(listings),
+                            len(jobs),
+                            round(listing_elapsed * 1000),
+                            round((perf_counter() - detail_started_at) * 1000),
+                            round((perf_counter() - started_at) * 1000),
+                        )
+                        return jobs
             except BrowserError as exc:
                 raise ApplicationError(
                     "BOSS_BROWSER_FAILED",
@@ -269,7 +290,7 @@ class BossJobSource:
         finally:
             _BROWSER_LOCK.release()
 
-    async def _collect_listings(self, playwright, plans: list[BossSearchPlan], limit: int) -> list[dict]:
+    async def _collect_listings(self, page, plans: list[BossSearchPlan], limit: int) -> list[dict]:
         """执行有限搜索计划，并以岗位 URL 去重列表卡片。"""
         found: dict[str, dict] = {}
         exhausted_queries: set[tuple[str, str]] = set()
@@ -283,7 +304,7 @@ class BossJobSource:
             if requested:
                 await self._sleep(self.settings.jobs_request_interval_seconds)
             requested = True
-            snapshot = await self._snapshot_with_retry(playwright, build_search_url(plan))
+            snapshot = await self._snapshot_with_retry(page, build_search_url(plan))
             rows = snapshot["rows"]
             if not rows:
                 body = snapshot["body"]
@@ -319,7 +340,7 @@ class BossJobSource:
             )
         return list(found.values())
 
-    async def _collect_details(self, playwright, listings: list[dict], limit: int) -> list[dict]:
+    async def _collect_details(self, page, listings: list[dict], limit: int) -> list[dict]:
         """逐个读取详情；单个结构异常不会丢弃其他已成功岗位。"""
         jobs: list[dict] = []
         failures = 0
@@ -327,7 +348,7 @@ class BossJobSource:
             await self._sleep(self.settings.jobs_request_interval_seconds)
             try:
                 snapshot = await self._snapshot_with_retry(
-                    playwright,
+                    page,
                     listing["job_url"],
                     include_html=True,
                 )
@@ -375,14 +396,14 @@ class BossJobSource:
 
     async def _snapshot_with_retry(
         self,
-        playwright,
+        page,
         url: str,
         include_html: bool = False,
     ) -> dict:
         """Chrome 偶发在 CDP 接入瞬间关闭页面；只对该瞬时错误重试一次。"""
         for attempt in range(2):
             try:
-                return await self._snapshot_page(playwright, url, include_html)
+                return await self._snapshot_page(page, url, include_html)
             except BrowserError:
                 if attempt:
                     raise
@@ -390,8 +411,9 @@ class BossJobSource:
                 await self._sleep(1)
         raise AssertionError("unreachable")
 
-    async def _snapshot_page(self, playwright, url: str, include_html: bool = False) -> dict:
-        """让普通 Chrome 预加载页面，再通过本机 CDP 做一次极短只读快照。"""
+    @asynccontextmanager
+    async def _browser_page(self, playwright):
+        """一次搜索仅启动一个登录浏览器，并在全部列表和详情页之间复用。"""
         with socket.socket() as port_socket:
             port_socket.bind(("127.0.0.1", 0))
             port = port_socket.getsockname()[1]
@@ -403,27 +425,69 @@ class BossJobSource:
             "--no-first-run",
             "--no-default-browser-check",
             "--new-window",
-            url,
+            "about:blank",
         ])
         endpoint = f"http://127.0.0.1:{port}"
+        browser = None
         try:
             await self._wait_for_debug_endpoint(endpoint, process)
-            await self._sleep(self.settings.jobs_browser_settle_seconds)
             browser = await playwright.chromium.connect_over_cdp(endpoint)
-            try:
-                pages = [
-                    page
-                    for context in browser.contexts
-                    for page in context.pages
-                    if "zhipin.com" in page.url
-                ]
-                if not pages:
-                    raise ApplicationError(
-                        "BOSS_PAGE_MISSING",
-                        "Chrome 已启动，但没有找到 BOSS 页面。",
-                        status_code=503,
-                    )
-                return await pages[0].evaluate(
+            contexts = browser.contexts
+            if not contexts:
+                raise ApplicationError(
+                    "BOSS_PAGE_MISSING",
+                    "Chrome 已启动，但没有可用浏览器上下文。",
+                    status_code=503,
+                )
+            pages = contexts[0].pages
+            page = pages[0] if pages else await contexts[0].new_page()
+            yield page
+        finally:
+            if browser is not None:
+                try:
+                    await browser.close()
+                except BrowserError:
+                    pass
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    await asyncio.to_thread(process.wait, 10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+    async def _snapshot_page(self, page, url: str, include_html: bool = False) -> dict:
+        """导航复用页面，出现目标 DOM、明确空态或访问拦截时立即读取快照。"""
+        timeout_ms = round(self.settings.jobs_page_timeout_seconds * 1000)
+        navigation_started_at = perf_counter()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        except BrowserTimeoutError:
+            # 某些页面的统计资源持续连接，但主体已经可读；继续检查业务 DOM。
+            LOGGER.info("boss_navigation_domcontentloaded_timeout url=%s", url)
+        readiness_markers = [
+            *_DETAIL_MARKERS,
+            *_NO_RESULT_MARKERS,
+            *_VERIFY_MARKERS,
+            *_LOGIN_MARKERS,
+        ]
+        try:
+            await page.wait_for_function(
+                r"""markers => {
+                    const body = document.body?.innerText || '';
+                    return Boolean(
+                        document.querySelector('a[href*="/job_detail/"]') ||
+                        document.querySelector('.job-sec-text, .job-detail-section, .job-detail-content') ||
+                        markers.some(marker => body.includes(marker))
+                    );
+                }""",
+                arg=readiness_markers,
+                timeout=timeout_ms,
+            )
+        except BrowserTimeoutError:
+            LOGGER.info("boss_business_dom_timeout url=%s", url)
+        if self.settings.jobs_dom_stable_seconds:
+            await self._sleep(self.settings.jobs_dom_stable_seconds)
+        snapshot = await page.evaluate(
                     r"""includeHtml => {
                         const text = node => (node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
                         const pick = (card, selectors) => {
@@ -467,18 +531,13 @@ class BossJobSource:
                     }""",
                     include_html,
                 )
-            finally:
-                try:
-                    await browser.close()
-                except BrowserError:
-                    pass
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    await asyncio.to_thread(process.wait, 10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+        LOGGER.info(
+            "boss_page_ready kind=%s elapsed_ms=%d url=%s",
+            "detail" if include_html else "listing",
+            round((perf_counter() - navigation_started_at) * 1000),
+            snapshot["url"],
+        )
+        return snapshot
 
     @staticmethod
     async def _wait_for_debug_endpoint(endpoint: str, process) -> None:

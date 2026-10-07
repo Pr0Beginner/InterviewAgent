@@ -6,7 +6,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
 from client.api.mock_api import MockApiClient
@@ -44,15 +44,15 @@ class JobsPageTest(unittest.TestCase):
 
     def test_jd_is_hidden_until_hover_or_focus(self):
         hover = HoverJobDescription("岗位职责：开发服务。")
-        hover.show()
-        self.app.processEvents()
-        hover.clearFocus()
-        QApplication.sendEvent(hover, QEvent(QEvent.Type.Leave))
+        collapsed_height = hover.sizeHint().height()
         self.assertTrue(hover.preview.isHidden())
-        QApplication.sendEvent(hover, QEvent(QEvent.Type.Enter))
+        QApplication.sendEvent(hover.trigger, QEvent(QEvent.Type.Enter))
         self.assertFalse(hover.preview.isHidden())
+        self.assertEqual(hover.sizeHint().height(), collapsed_height)
+        self.assertTrue(bool(hover.preview.windowFlags() & Qt.WindowType.ToolTip))
+        QApplication.sendEvent(hover.trigger, QEvent(QEvent.Type.Leave))
         QApplication.sendEvent(hover, QEvent(QEvent.Type.Leave))
-        self.assertTrue(hover.preview.isHidden())
+        self.wait_until(hover.preview.isHidden)
 
     def test_page_defaults_to_graduate_experience_and_renders_right_actions(self):
         api = CapturingApi()
@@ -76,6 +76,10 @@ class JobsPageTest(unittest.TestCase):
             for action in actions
         ))
         self.assertTrue(all(hover.preview.isHidden() for hover in page.findChildren(HoverJobDescription)))
+        context = page.agent_context()
+        self.assertEqual(context["work_experience"], "应届生")
+        self.assertEqual(context["keywords"], ["Java 后端"])
+        self.assertGreater(context["result_count"], 0)
         page.close()
         self.app.processEvents()
 

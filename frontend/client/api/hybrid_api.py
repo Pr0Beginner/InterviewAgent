@@ -202,7 +202,8 @@ class HybridApiClient(ApiClient):
         """
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(150.0, connect=10.0), trust_env=False,
+                # 连接仍快速失败；长工具阶段由后端的模型/页面级超时负责。
+                timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0), trust_env=False,
                 transport=self._transport,
             ) as client:
                 async with client.stream("POST", self._chat_url, json={
