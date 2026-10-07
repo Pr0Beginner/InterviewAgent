@@ -5,8 +5,7 @@ cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" (
     echo [ERROR] Project virtual environment was not found.
-    echo Run: python -m venv .venv
-    echo Then install: .venv\Scripts\python.exe -m pip install -r requirements.txt
+    echo Run setup.bat to install the required environment.
     pause
     exit /b 1
 )

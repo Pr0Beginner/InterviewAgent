@@ -51,6 +51,7 @@ InterviewAssistant/
 │  ├─ tests/                 # 后端测试
 │  └─ .env.example           # 配置模板，不包含密钥
 ├─ scripts/                  # 启动、接入检查和冒烟测试脚本
+├─ setup.bat                 # 一键创建虚拟环境并安装依赖
 ├─ start.bat                 # 一键启动前后端
 ├─ start-boss-login.bat      # 初始化 BOSS 专用浏览器登录态
 ├─ CLIENT_DESIGN.md          # 客户端设计
@@ -69,14 +70,13 @@ InterviewAssistant/
 
 ## 安装
 
-在项目根目录执行：
+Windows 下双击项目根目录的 `setup.bat`，或在终端执行：
 
 ```bat
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-copy backend\.env.example backend\.env
+setup.bat
 ```
+
+脚本会自动查找 Python 3.11/3.12、创建或复用 `.venv`、升级 pip 工具链、安装前后端依赖、验证关键模块，并在 `backend/.env` 不存在时从模板创建。重复执行不会覆盖已有的 `.env` 和密钥配置。
 
 ## 配置
 
